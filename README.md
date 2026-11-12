@@ -68,6 +68,12 @@ docker run -d --name g-seekr -p 127.0.0.1:5056:5056 -v ./data:/data --env-file .
 - **Health check:** `GET /api/health`.
 - **TLS:** serve it behind a proxy that terminates TLS (Tailscale Serve, Caddy), and set `TRUST_PROXY` so client addresses are right.
 
+## Compared with Seerr
+
+[`docs/seerr-gaps.md`](docs/seerr-gaps.md) lists what Seerr does that g-seekr doesn't yet,
+including discovery, recommendations, live progress, issue reports, permissions and
+notifications. It also says what each gap depends on and suggests an order.
+
 ## Development
 
 ```bash
