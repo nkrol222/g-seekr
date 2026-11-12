@@ -1,6 +1,6 @@
 # Every PR and push: lint, type-check, tests, build.
-# Push to main (and manual runs): also build the amd64 image and push it to
-# ghcr.io/<owner>/g-seekr as :main and :sha-<short sha>. Deployment is manual:
+# Push to main (and manual runs): also build the amd64 + arm64 image (argus is a Pi 5)
+# and push it to ghcr.io/<owner>/g-seekr as :main and :sha-<short sha>. Deployment is manual:
 # homelab-iac pins the image by digest.
 name: CI
 
@@ -60,7 +60,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
