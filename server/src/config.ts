@@ -8,6 +8,8 @@ export interface Config {
   jellyfinUrl: string;
   retroarrUrl: string;
   retroarrToken: string;
+  // Shared secret RetroArr sends as X-Webhook-Token; null = the webhook endpoint is off and only the poller runs
+  retroarrWebhookToken: string | null;
   // Where people play; "available" requests link here. Optional.
   rommUrl: string | null;
   discordWebhookUrl: string | null;
@@ -87,6 +89,7 @@ export function loadConfig(env: Env = process.env): Config {
     jellyfinUrl: url('JELLYFIN_URL', true) ?? '',
     retroarrUrl: url('RETROARR_URL', true) ?? '',
     retroarrToken: str('RETROARR_TOKEN'),
+    retroarrWebhookToken: optional('RETROARR_WEBHOOK_TOKEN'),
     rommUrl: url('ROMM_URL', false),
     discordWebhookUrl: url('DISCORD_WEBHOOK_URL', false),
     publicUrl: url('PUBLIC_URL', false),
@@ -102,6 +105,9 @@ export function loadConfig(env: Env = process.env): Config {
 
   if (config.retroarrToken && !config.retroarrToken.startsWith('rat_')) {
     problems.push('RETROARR_TOKEN must be a RetroArr API token (rat_…) with the requests scope, not the instance API key');
+  }
+  if (config.retroarrWebhookToken && config.retroarrWebhookToken.length < 24) {
+    problems.push('RETROARR_WEBHOOK_TOKEN must be at least 24 characters (openssl rand -hex 32)');
   }
   if (problems.length > 0) throw new Error(`Invalid configuration:\n  - ${problems.join('\n  - ')}`);
   return config;

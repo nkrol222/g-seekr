@@ -51,6 +51,10 @@ const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX ux_requests_open ON requests(igdb_id, platform_id)
     WHERE status IN ('pending', 'approved', 'searching', 'downloading', 'available');
   `,
+  // 2: the release RetroArr grabbed for a request (from its webhooks)
+  `
+  ALTER TABLE requests ADD COLUMN release TEXT;
+  `,
 ];
 
 export function openDb(path: string): Db {

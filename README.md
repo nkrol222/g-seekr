@@ -18,8 +18,8 @@ browser ── g-seekr ──sign-in──▶ Jellyfin
 |---|---|
 | `pending` | Waiting for an admin. Admins' own requests, and those of users set to auto-approve, skip this. |
 | `approved` | Being handed to RetroArr. |
-| `searching` | RetroArr has the game, monitored, and is looking for a release. Its monitored sweep keeps searching. |
-| `downloading` | RetroArr reports the game downloading. |
+| `searching` | RetroArr has the game, monitored, and is looking for a release. Its monitored sweep keeps searching. After a failed download the request says why, and RetroArr searches again by itself. |
+| `downloading` | RetroArr grabbed a release (shown on the request), or reports the game downloading. |
 | `available` | RetroArr imported it. The request links to RomM. |
 | `declined` | An admin said no, optionally with a note. |
 | `failed` | RetroArr refused or couldn't be reached. An admin can retry. |
@@ -29,8 +29,10 @@ The hand-off works like this:
 2. It sets the game to monitored.
 3. It starts a search with automatic grabbing.
 
-Every `POLL_SECONDS` (default 5 minutes), g-seekr checks the games it handed off and updates
-their status. RetroArr's status webhooks (fork step A6) will replace the polling later.
+RetroArr's webhooks move a request as things happen: a grab makes it `downloading`, an import
+`available`, and a failed download leaves it `searching` with the reason. A removed game fails it.
+They need `RETROARR_WEBHOOK_TOKEN`; see "RetroArr webhook" below. Every `POLL_SECONDS` (default
+5 minutes), g-seekr also checks the games it handed off, which catches anything a webhook missed.
 
 ## Rules
 
@@ -57,6 +59,20 @@ their defaults. `JELLYFIN_URL`, `RETROARR_URL` and `RETROARR_TOKEN` are required
 
 To create the RetroArr token: RetroArr → **Settings → API access → Tokens for other apps**.
 Name it `g-seekr`, tick only `requests`, and copy the `rat_…` value. It's shown once.
+
+### RetroArr webhook
+
+So requests update the moment RetroArr grabs, imports or fails a download:
+1. Generate a secret, `openssl rand -hex 32`, and set it as `RETROARR_WEBHOOK_TOKEN`.
+2. In RetroArr → **Settings → Webhooks**, add one:
+   - URL `https://<g-seekr>/api/webhooks/retroarr`, method `POST`;
+   - events `OnDownloadStarted`, `OnDownloadCompleted`, `OnDownloadFailed` and `OnGameRemoved`;
+   - headers `{"X-Webhook-Token": "<the secret>"}`;
+   - no payload template.
+3. Press **Test**. g-seekr answers `{"updated": 0}` for the test event; a wrong token gets `401`.
+
+Without the variable the endpoint answers `404` and only the poller runs. The token is compared in
+constant time. The endpoint takes no session or CSRF header, since RetroArr isn't a browser.
 
 ## Running it
 

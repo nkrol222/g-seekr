@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type GameRequest, type Me } from '../api';
-import { Cover, rommLink, StatusBadge, when } from './shared';
+import { Cover, rommLink, StatusBadge, StatusDetail, when } from './shared';
 
 export function MyRequests({ me, onChanged }: { me: Me; onChanged: () => void }) {
   const [requests, setRequests] = useState<GameRequest[] | null>(null);
@@ -52,6 +52,7 @@ export function MyRequests({ me, onChanged }: { me: Me; onChanged: () => void })
                   {r.platformName} · requested {when(r.createdAt)}
                 </p>
                 <StatusBadge request={r} />
+                <StatusDetail request={r} />
                 {r.note && <p className="small">Note: {r.note}</p>}
                 <div className="actions">
                   {play && (

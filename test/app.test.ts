@@ -272,3 +272,87 @@ describe('admin', () => {
     expect((await built.app.inject({ method: 'PATCH', url: `/api/admin/users/${aliceId}`, headers: root.headers, payload: { requestLimit: -1 } })).statusCode).toBe(400);
   });
 });
+
+describe('RetroArr webhooks', () => {
+  const HOOK_TOKEN = 'h'.repeat(32);
+  const hook = (event: string, data: Record<string, unknown>, token: string | null = HOOK_TOKEN) =>
+    built.app.inject({
+      method: 'POST',
+      url: '/api/webhooks/retroarr',
+      // RetroArr sends no session cookie, CSRF header or Origin
+      headers: token === null ? {} : { 'x-webhook-token': token },
+      payload: { event, timestamp: clock.toISOString(), data },
+    });
+
+  async function approvedRequest() {
+    const root = await login('root');
+    const created = await built.app.inject({ method: 'POST', url: '/api/requests', headers: root.headers, payload: { igdbId: 1020, platformId: 41 } });
+    expect(created.json().request).toMatchObject({ status: 'searching', retroarrGameId: 100 });
+    return created.json().request.id as number;
+  }
+
+  it('is off without RETROARR_WEBHOOK_TOKEN, and refuses a wrong or missing token', async () => {
+    await start();
+    expect((await hook('OnDownloadStarted', { gameId: 100 })).statusCode).toBe(404);
+    await built.app.close();
+
+    await start({ RETROARR_WEBHOOK_TOKEN: HOOK_TOKEN });
+    expect((await hook('OnDownloadStarted', { gameId: 100 }, null)).statusCode).toBe(401);
+    expect((await hook('OnDownloadStarted', { gameId: 100 }, 'x'.repeat(32))).statusCode).toBe(401);
+    expect((await hook('OnDownloadStarted', { gameId: 100 })).json()).toEqual({ updated: 0 });
+    expect(() => loadConfig({ JELLYFIN_URL: JELLYFIN, RETROARR_URL: RETROARR, RETROARR_TOKEN: TOKEN, RETROARR_WEBHOOK_TOKEN: 'short' })).toThrow(/at least 24/);
+  });
+
+  it('follows a request from grab to import without waiting for the poller', async () => {
+    await start({ RETROARR_WEBHOOK_TOKEN: HOOK_TOKEN });
+    const id = await approvedRequest();
+
+    const grabbed = await hook('OnDownloadStarted', { gameId: 100, igdbId: 1020, release: 'Chrono Trigger (USA)', automatic: true });
+    expect(grabbed.json()).toEqual({ updated: 1 });
+    expect(built.store.request(id)).toMatchObject({ status: 'downloading', release: 'Chrono Trigger (USA)' });
+
+    // RetroArr's game status doesn't show a grab: the poller leaves the request downloading
+    await built.requests.poll();
+    expect(built.store.request(id)!.status).toBe('downloading');
+
+    await hook('OnDownloadCompleted', { gameId: 100, release: 'Chrono Trigger (USA)', upgrade: false });
+    expect(built.store.request(id)).toMatchObject({ status: 'available', availableAt: clock.toISOString() });
+    await flush();
+    expect(fakes.discord.at(-1)!.content).toContain('is ready to play, root');
+
+    // Finished requests are no longer followed
+    expect((await hook('OnDownloadFailed', { gameId: 100, reason: 'x' })).json()).toEqual({ updated: 0 });
+  });
+
+  it('keeps a request whose download failed open, says why, and tells Discord', async () => {
+    await start({ RETROARR_WEBHOOK_TOKEN: HOOK_TOKEN });
+    const id = await approvedRequest();
+    await hook('OnDownloadStarted', { gameId: 100, release: 'Chrono Trigger (USA)' });
+
+    await hook('OnDownloadFailed', { gameId: 100, stage: 'download', reason: 'no progress for 24 hours' });
+
+    expect(built.store.request(id)).toMatchObject({
+      status: 'searching',
+      error: 'The last download failed: no progress for 24 hours. RetroArr is searching again.',
+    });
+    await flush();
+    expect(fakes.discord.at(-1)!.content).toContain('The download of **Chrono Trigger** (1995) for Super Nintendo failed (no progress for 24 hours)');
+
+    // The next grab clears the error
+    await hook('OnDownloadStarted', { gameId: 100, release: 'Chrono Trigger (Europe)' });
+    expect(built.store.request(id)).toMatchObject({ status: 'downloading', release: 'Chrono Trigger (Europe)', error: null });
+  });
+
+  it('fails a request whose game is removed, and ignores other games, other events and junk', async () => {
+    await start({ RETROARR_WEBHOOK_TOKEN: HOOK_TOKEN });
+    const id = await approvedRequest();
+
+    expect((await hook('OnDownloadStarted', { gameId: 999 })).json()).toEqual({ updated: 0 });
+    expect((await hook('OnGameAdded', { gameId: 100 })).json()).toEqual({ updated: 0 });
+    expect((await built.app.inject({ method: 'POST', url: '/api/webhooks/retroarr', headers: { 'x-webhook-token': HOOK_TOKEN }, payload: { nope: 1 } })).statusCode).toBe(400);
+    expect(built.store.request(id)!.status).toBe('searching');
+
+    await hook('OnGameRemoved', { gameId: 100, deletedFiles: false });
+    expect(built.store.request(id)).toMatchObject({ status: 'failed', error: 'The game was removed from RetroArr.' });
+  });
+});

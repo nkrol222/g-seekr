@@ -81,6 +81,7 @@ export function AdminRequests({ me }: { me: Me }) {
                   {r.platformName} · {r.username} · {when(r.createdAt)}
                 </p>
                 <StatusBadge request={r} />
+                {r.status === 'downloading' && r.release && <p className="muted small">Downloading {r.release}</p>}
                 {r.error && <p className="error small">{r.error}</p>}
                 {r.note && <p className="small">Note: {r.note}</p>}
                 {r.status === 'pending' && (

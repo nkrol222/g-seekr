@@ -29,6 +29,8 @@ export interface GameRequest {
   coverUrl: string | null;
   status: RequestStatus;
   retroarrGameId: number | null;
+  // The release RetroArr grabbed, from its OnDownloadStarted webhook
+  release: string | null;
   note: string | null;
   error: string | null;
   decidedBy: number | null;
@@ -64,6 +66,7 @@ const toRequest = (r: Row): GameRequest => ({
   coverUrl: r.cover_url == null ? null : String(r.cover_url),
   status: String(r.status) as RequestStatus,
   retroarrGameId: r.retroarr_game_id == null ? null : Number(r.retroarr_game_id),
+  release: r.release == null ? null : String(r.release),
   note: r.note == null ? null : String(r.note),
   error: r.error == null ? null : String(r.error),
   decidedBy: r.decided_by == null ? null : Number(r.decided_by),
@@ -217,11 +220,12 @@ export class Store {
 
   updateRequest(
     id: number,
-    patch: Partial<Pick<GameRequest, 'status' | 'retroarrGameId' | 'note' | 'error' | 'decidedBy' | 'decidedAt' | 'availableAt'>>,
+    patch: Partial<Pick<GameRequest, 'status' | 'retroarrGameId' | 'release' | 'note' | 'error' | 'decidedBy' | 'decidedAt' | 'availableAt'>>,
   ): GameRequest | null {
     const columns: Record<string, string> = {
       status: 'status',
       retroarrGameId: 'retroarr_game_id',
+      release: 'release',
       note: 'note',
       error: 'error',
       decidedBy: 'decided_by',

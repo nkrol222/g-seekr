@@ -10,7 +10,7 @@ status. The first version covers that core loop and little more. This page lists
 - **RSS:** RSS sync (RetroArr gap 2);
 - **IGDB:** an IGDB endpoint RetroArr doesn't expose to the `requests` scope yet.
 
-Status as of 2026-11-12.
+Status as of 2026-11-14.
 
 ## 1. Discovery and recommendations
 
@@ -36,7 +36,7 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 | Admins request on behalf of a user | None | "Request for…" in the admin view | – |
 | Quotas per user and per media type, with global defaults | One limit per user, plus a global default | Separate limits per platform family, if that turns out to be useful | – |
 | Comments on a request, both ways | One admin note on approve or decline | A comment thread per request; notifications on new comments | – |
-| Download progress on the request ("Processing 43%") | `searching` → `available`; `downloading` only when RetroArr reports it | Live status: grabbed (which release), progress, importing, available; failed downloads shown with the reason | A6; a RetroArr queue endpoint in the `requests` scope |
+| Download progress on the request ("Processing 43%") | Live from RetroArr's webhooks: grabbed (with the release), available, and a failed download with its reason | Progress in percent while downloading | A RetroArr queue endpoint in the `requests` scope |
 | Marked available when the library has it, even unrequested | "In the library" from RetroArr's `isOwned` | Also check RomM (what people actually see), so games added by hand show as available | RomM API access |
 | A deep link to the item in Jellyfin | A link to RomM's home page | Link to the game itself in RomM, looked up by IGDB id | RomM API access |
 
@@ -67,14 +67,14 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 | Configured in the web UI (servers, profiles, users, notifications) | Environment variables only | A Settings page for what changes at runtime (limits, platforms, notifications); secrets stay in env | – |
 | Several Sonarr/Radarr servers, and a default per type | One RetroArr | Several RetroArr instances or profiles, e.g. a separate one for PC games | A4 |
 | API with an API key; Homepage widget type | Session-cookie API; Homepage shows only up/down | API keys for integrations; a summary endpoint (pending, processing, available counts) that Homepage's `customapi` widget can read | – |
-| Status updates in real time | Polls RetroArr every 5 minutes | Receive RetroArr's webhooks | A6 |
+| ~~Status updates in real time~~ | Done: RetroArr's webhooks, with the 5-minute poll as a backstop | – | – |
 | Translated into many languages | English only | i18n, starting with the languages RetroArr already ships | – |
 | Installable PWA, responsive | Responsive page, no PWA | Manifest, icons, service worker (needed for web push) | – |
 | Request statistics, recently requested | None | An admin dashboard: requests over time, top requesters, fulfilment time, failure reasons | – |
 
 ## Suggested order
 
-1. **Live status and issues**, once A6 lands: progress on the request, failed downloads with the reason, and "report a problem" with a one-click replace. These close the loop on what users already do.
+1. **Live status and issues:** grabbed, available and failed-with-reason are live since A6. Still to do: progress in percent, and "report a problem" with a one-click replace. These close the loop on what users already do.
 2. **Discovery basics:** a game detail page, then sliders for popular, upcoming, recently added and by platform. This needs the IGDB endpoints in RetroArr, or g-seekr's own IGDB credentials. That choice is open: RetroArr already holds the credentials and the platform mapping, so extending its `requests` scope keeps one source of truth.
 3. **Recommendations:** similar games on the detail page, then "because you requested" and "because you played", the latter from RomM.
 4. **Request options**, once A4 lands: a release preference per request.
