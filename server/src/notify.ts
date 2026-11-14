@@ -35,6 +35,11 @@ export class Notifier {
     }
   }
 
+  // RetroArr blocklisted the release and searches again; the request stays open
+  async downloadFailed(r: GameRequest, reason: string | null): Promise<void> {
+    await this.send(`⚠️ The download of ${this.label(r)} failed${reason ? ` (${reason})` : ''}. RetroArr is looking for another release.`);
+  }
+
   private async send(content: string): Promise<void> {
     if (!this.webhookUrl) return;
     try {

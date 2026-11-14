@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import cookie from '@fastify/cookie';
@@ -30,6 +31,15 @@ export interface AppDeps {
 }
 
 const PUBLIC_ROUTES = new Set(['/api/health', '/api/auth/login']);
+// Called by RetroArr, not a browser: no session or CSRF header, the shared token authenticates it
+const WEBHOOK_ROUTE = '/api/webhooks/retroarr';
+
+// Compared as hashes, so neither the length nor the content leaks through timing
+function tokensMatch(given: string, expected: string): boolean {
+  const a = createHash('sha256').update(given).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
 
 export async function buildApp(deps: AppDeps) {
   const { config, db } = deps;
@@ -63,6 +73,7 @@ export async function buildApp(deps: AppDeps) {
   app.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     const path = req.url.split('?')[0]!;
+    if (path === WEBHOOK_ROUTE) return;
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       if (req.headers[CSRF_HEADER] !== '1') return reply.code(403).send({ error: 'Missing request header.' });
@@ -98,6 +109,20 @@ export async function buildApp(deps: AppDeps) {
   });
 
   // ---- auth ----
+
+  // RetroArr's webhooks (OnDownloadStarted, OnDownloadCompleted, OnDownloadFailed, OnGameRemoved). Off, and answered
+  // 404, without RETROARR_WEBHOOK_TOKEN.
+  app.post<{ Body: { event?: unknown; data?: unknown } }>(WEBHOOK_ROUTE, async (req, reply) => {
+    const expected = config.retroarrWebhookToken;
+    if (!expected) return reply.code(404).send({ error: 'Not found.' });
+    const given = req.headers['x-webhook-token'];
+    if (typeof given !== 'string' || !tokensMatch(given, expected)) return reply.code(401).send({ error: 'Wrong or missing webhook token.' });
+    const event = typeof req.body?.event === 'string' ? req.body.event : null;
+    const data = req.body?.data && typeof req.body.data === 'object' ? (req.body.data as Record<string, unknown>) : null;
+    if (!event || !data) return reply.code(400).send({ error: 'Expected {"event": …, "data": {…}}.' });
+    const updated = requests.handleRetroArrEvent(event, data);
+    return reply.code(200).send({ updated });
+  });
 
   app.get('/api/health', async () => {
     db.prepare('SELECT 1').get();
