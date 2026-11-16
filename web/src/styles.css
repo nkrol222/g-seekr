@@ -978,6 +978,118 @@ button.avatar {
   font-style: italic;
 }
 
+/* ---------- live progress ---------- */
+.request-card .facts dd.live {
+  display: block;
+  min-width: 0;
+}
+.progress {
+  display: grid;
+  gap: 0.25rem;
+  max-width: 28rem;
+}
+.progress-track {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--gray-700);
+  overflow: hidden;
+}
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--indigo-600), var(--indigo-400));
+  transition: width 0.6s ease;
+}
+.progress-track span.done {
+  background: var(--green-500);
+}
+.progress-track span.bad {
+  background: var(--red-500);
+}
+.progress-text {
+  font-size: 0.78rem;
+  color: var(--gray-300);
+}
+.progress-msg {
+  font-size: 0.75rem;
+  color: var(--yellow-400);
+}
+
+/* ---------- problem reports ---------- */
+.badge.issue-open {
+  background: rgba(234, 179, 8, 0.85);
+  border-color: var(--yellow-400);
+  color: #fff;
+}
+.badge.issue-replacing {
+  background: rgba(99, 102, 241, 0.85);
+  border-color: var(--indigo-400);
+  color: #fff;
+}
+.badge.issue-resolved {
+  background: rgba(34, 197, 94, 0.85);
+  border-color: var(--green-400);
+  color: #fff;
+}
+.modal.dialog {
+  width: min(32rem, 100%);
+}
+.dialog-body {
+  display: grid;
+  gap: 1rem;
+  padding: 1.75rem;
+}
+.dialog-body h2 {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.dialog-body > p {
+  margin: -0.6rem 0 0;
+}
+.kinds {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.kinds legend {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--gray-300);
+}
+.kind {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--gray-700);
+  background: var(--gray-900);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.kind.active {
+  border-color: var(--indigo-500);
+  background: rgba(79, 70, 229, 0.15);
+}
+.kind input {
+  accent-color: var(--indigo-500);
+  margin: 0;
+}
+textarea.input {
+  resize: vertical;
+  font: inherit;
+  font-size: 0.875rem;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 /* ---------- users table ---------- */
 .table-wrap {
   overflow-x: auto;

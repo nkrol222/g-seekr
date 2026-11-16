@@ -35,6 +35,8 @@ export interface GameRequest {
   year: number | null;
   coverUrl: string | null;
   status: RequestStatus;
+  // The game in RetroArr, once handed off; download progress is looked up by it
+  retroarrGameId: number | null;
   // What RetroArr grabbed for it
   release: string | null;
   note: string | null;
@@ -43,6 +45,54 @@ export interface GameRequest {
   updatedAt: string;
   availableAt: string | null;
 }
+
+// What the download client is doing for a game RetroArr is fetching
+export interface Progress {
+  gameId: number;
+  release: string;
+  progress: number;
+  state: string;
+  trackedState: string | null;
+  statusMessages: string[];
+}
+
+export type IssueKind = 'wont_launch' | 'wrong_game' | 'wrong_region' | 'missing_files' | 'other';
+export type IssueStatus = 'open' | 'replacing' | 'resolved';
+
+export interface Issue {
+  id: number;
+  requestId: number;
+  userId: number;
+  username: string;
+  kind: IssueKind;
+  message: string | null;
+  status: IssueStatus;
+  resolution: string | null;
+  replacementRelease: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  title: string;
+  year: number | null;
+  platformName: string;
+  coverUrl: string | null;
+  retroarrGameId: number | null;
+  release: string | null;
+}
+
+export const ISSUE_KIND_LABEL: Record<IssueKind, string> = {
+  wont_launch: 'Won’t launch',
+  wrong_game: 'Wrong game',
+  wrong_region: 'Wrong region or language',
+  missing_files: 'Missing files or discs',
+  other: 'Something else',
+};
+
+export const ISSUE_STATUS_LABEL: Record<IssueStatus, string> = {
+  open: 'Open',
+  replacing: 'Being replaced',
+  resolved: 'Resolved',
+};
 
 export interface AdminUser {
   id: number;
@@ -93,6 +143,12 @@ export const api = {
   decline: (id: number, note?: string) => call<{ request: GameRequest }>('POST', `/requests/${id}/decline`, { note }),
   retry: (id: number) => call<{ request: GameRequest }>('POST', `/requests/${id}/retry`, {}),
   remove: (id: number) => call<void>('DELETE', `/requests/${id}`),
+  progress: (scope: 'mine' | 'all') => call<{ progress: Progress[]; error?: string }>('GET', `/progress?scope=${scope}`),
+  issues: (scope: 'mine' | 'all') => call<{ issues: Issue[] }>('GET', `/issues?scope=${scope}`),
+  report: (requestId: number, kind: IssueKind, message: string) =>
+    call<{ issue: Issue }>('POST', `/requests/${requestId}/issues`, { kind, message: message.trim() || undefined }),
+  replaceIssue: (id: number) => call<{ issue: Issue }>('POST', `/issues/${id}/replace`, {}),
+  resolveIssue: (id: number, note?: string) => call<{ issue: Issue }>('POST', `/issues/${id}/resolve`, { note }),
   users: () => call<{ users: AdminUser[] }>('GET', '/admin/users'),
   updateUser: (id: number, patch: Partial<{ isAdmin: boolean; autoApprove: boolean; requestLimit: number | null }>) =>
     call<{ user: AdminUser }>('PATCH', `/admin/users/${id}`, patch),

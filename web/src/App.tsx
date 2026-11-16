@@ -5,9 +5,10 @@ import { Discover } from './pages/Discover';
 import { Search } from './pages/Search';
 import { isFilter, Requests } from './pages/Requests';
 import { AdminUsers } from './pages/AdminUsers';
+import { Issues } from './pages/Issues';
 import { Avatar, Icon, Mark, type IconName } from './pages/shared';
 
-type View = 'discover' | 'search' | 'requests' | 'users';
+type View = 'discover' | 'search' | 'requests' | 'issues' | 'users';
 
 interface Route {
   view: View;
@@ -17,7 +18,7 @@ interface Route {
 // #/search?q=zelda, #/requests?filter=pending, #/users; anything else is Discover
 const parseHash = (): Route => {
   const [path = '', query = ''] = window.location.hash.replace(/^#\/?/, '').split('?');
-  const view = (['search', 'requests', 'users'] as const).find((v) => v === path) ?? 'discover';
+  const view = (['search', 'requests', 'issues', 'users'] as const).find((v) => v === path) ?? 'discover';
   // #/mine and #/queue were the old requests pages
   return { view: path === 'mine' || path === 'queue' ? 'requests' : view, params: new URLSearchParams(query) };
 };
@@ -27,14 +28,16 @@ export function App() {
   const [checked, setChecked] = useState(false);
   const [route, setRoute] = useState<Route>(parseHash);
   const [pending, setPending] = useState(0);
+  const [openIssues, setOpenIssues] = useState(0);
 
   const refreshMe = useCallback(async () => {
     try {
       const next = await api.me();
       setMe(next);
       if (next.user.isAdmin) {
-        const { requests } = await api.requests('all');
+        const [{ requests }, { issues }] = await Promise.all([api.requests('all'), api.issues('all')]);
         setPending(requests.filter((r) => r.status === 'pending').length);
+        setOpenIssues(issues.filter((i) => i.status === 'open').length);
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) setMe(null);
@@ -58,10 +61,11 @@ export function App() {
   const filter = route.params.get('filter');
 
   return (
-    <Shell me={me} view={view} query={view === 'search' ? (route.params.get('q') ?? '') : ''} pending={pending} onSignOut={() => setMe(null)}>
+    <Shell me={me} view={view} query={view === 'search' ? (route.params.get('q') ?? '') : ''} pending={pending} openIssues={openIssues} onSignOut={() => setMe(null)}>
       {view === 'discover' && <Discover me={me} />}
       {view === 'search' && <Search query={route.params.get('q') ?? ''} onRequested={refreshMe} />}
       {view === 'requests' && <Requests me={me} filter={isFilter(filter) ? filter : admin ? 'open' : 'all'} onChanged={refreshMe} />}
+      {view === 'issues' && <Issues me={me} onChanged={refreshMe} />}
       {view === 'users' && <AdminUsers me={me} />}
     </Shell>
   );
@@ -72,6 +76,7 @@ function Shell({
   view,
   query,
   pending,
+  openIssues,
   onSignOut,
   children,
 }: {
@@ -79,6 +84,7 @@ function Shell({
   view: View;
   query: string;
   pending: number;
+  openIssues: number;
   onSignOut: () => void;
   children: React.ReactNode;
 }) {
@@ -104,6 +110,7 @@ function Shell({
   const links: { id: View; label: string; icon: IconName; href: string; count?: number }[] = [
     { id: 'discover', label: 'Discover', icon: 'sparkles', href: '#/' },
     { id: 'requests', label: me.user.isAdmin ? 'Requests' : 'My requests', icon: 'clock', href: '#/requests', count: me.user.isAdmin ? pending : 0 },
+    { id: 'issues', label: me.user.isAdmin ? 'Issues' : 'My problems', icon: 'flag', href: '#/issues', count: me.user.isAdmin ? openIssues : 0 },
     ...(me.user.isAdmin ? [{ id: 'users' as const, label: 'Users', icon: 'users' as const, href: '#/users' }] : []),
   ];
 

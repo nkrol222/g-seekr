@@ -38,6 +38,14 @@ export class Fakes {
   calls: string[] = [];
   addedBodies: Array<Record<string, unknown>> = [];
   discord: Array<{ content: string; allowed_mentions: unknown }> = [];
+  // The download client's queue as RetroArr reports it per game; null = an older RetroArr without the endpoint
+  queue: Array<{ gameId: number; release: string; progress: number; state: string; trackedState?: string; statusMessages?: string[] }> | null = [];
+  // What POST /games/{id}/replace answers
+  replaceAnswer: { status: number; body: Record<string, unknown> } = {
+    status: 200,
+    body: { blocklisted: 'Chrono Trigger (USA)', autoQueued: true, autoQueuedRelease: 'Chrono Trigger (Europe)', autoDispatchSkipped: null, error: null },
+  };
+  replaced: Array<{ gameId: number; reason: string }> = [];
 
   fetch: typeof fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
@@ -108,6 +116,16 @@ export class Fakes {
         return json({ ok: true });
       }
       if (/^\/games\/\d+\/search-now$/.test(path)) return json({ scored: [] });
+      if (path === '/downloadclient/queue/games') {
+        if (this.queue === null) return json({ error: 'unknown route' }, 404);
+        const ids = url.searchParams.get('ids')!.split(',').map(Number);
+        return json(this.queue.filter((d) => ids.includes(d.gameId)));
+      }
+      m = path.match(/^\/games\/(\d+)\/replace$/);
+      if (m && method === 'POST') {
+        this.replaced.push({ gameId: Number(m[1]), reason: body.reason });
+        return json(this.replaceAnswer.body, this.replaceAnswer.status);
+      }
       return json({ error: 'unknown route ' + path }, 404);
     }
     throw new Error('unexpected fetch ' + url.href);
