@@ -48,6 +48,59 @@ export interface RetroArrReplaceResult {
   error: string | null;
 }
 
+export interface DiscoverOption {
+  id: number;
+  name: string;
+}
+
+export interface RetroArrDiscoverGame {
+  igdbId: number;
+  title: string;
+  year: number | null;
+  coverUrl: string | null;
+  summary: string | null;
+  rating: number | null;
+  ratingCount: number | null;
+  genres: string[];
+  platformIds: number[];
+  // What RetroArr's library has of it, per platform
+  library: { gameId: number; platformId: number; status: RetroArrGameStatus }[];
+}
+
+export interface RetroArrDiscoverDetail {
+  game: RetroArrDiscoverGame;
+  storyline: string | null;
+  backgroundUrl: string | null;
+  screenshots: string[];
+  videos: { name: string; youtubeId: string }[];
+  themes: string[];
+  gameModes: string[];
+  developers: string[];
+  publishers: string[];
+  franchises: string[];
+  releases: { platform: string; platformId: number | null; date: string | null }[];
+  similar: RetroArrDiscoverGame[];
+}
+
+function toDiscoverGame(g: Record<string, unknown>): RetroArrDiscoverGame {
+  const nums = (v: unknown) => (Array.isArray(v) ? v.filter((n): n is number => typeof n === 'number') : []);
+  return {
+    igdbId: Number(g.igdbId),
+    title: String(g.title ?? ''),
+    year: typeof g.year === 'number' ? g.year : null,
+    coverUrl: typeof g.coverUrl === 'string' ? g.coverUrl : null,
+    summary: typeof g.summary === 'string' ? g.summary : null,
+    rating: typeof g.rating === 'number' ? g.rating : null,
+    ratingCount: typeof g.ratingCount === 'number' ? g.ratingCount : null,
+    genres: Array.isArray(g.genres) ? g.genres.filter((x): x is string => typeof x === 'string') : [],
+    platformIds: nums(g.platformIds),
+    library: (Array.isArray(g.library) ? g.library : []).map((l) => {
+      const o = l as Record<string, unknown>;
+      return { gameId: Number(o.gameId), platformId: Number(o.platformId), status: gameStatus(o.status) };
+    }),
+  };
+}
+
 export class RetroArrError extends Error {
   constructor(
     message: string,
@@ -198,6 +251,55 @@ export class RetroArrClient {
       skipped: text(r.autoDispatchSkipped),
       error: text(r.error),
     };
+  }
+
+  // ---- discovery (IGDB lists, through RetroArr) ----
+
+  async discoverGames(query: Record<string, unknown>): Promise<RetroArrDiscoverGame[]> {
+    const res = await this.call<{ games?: Array<Record<string, unknown>> }>('POST', '/discover/games', query, 60_000);
+    return (res.games ?? []).map(toDiscoverGame);
+  }
+
+  async discoverGame(igdbId: number, includeAdult: boolean): Promise<RetroArrDiscoverDetail | null> {
+    try {
+      const d = await this.call<Record<string, unknown>>('GET', `/discover/games/${igdbId}?includeAdult=${includeAdult}`, undefined, 60_000);
+      const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+      return {
+        game: toDiscoverGame((d.game ?? {}) as Record<string, unknown>),
+        storyline: typeof d.storyline === 'string' ? d.storyline : null,
+        backgroundUrl: typeof d.backgroundUrl === 'string' ? d.backgroundUrl : null,
+        screenshots: strings(d.screenshots),
+        videos: (Array.isArray(d.videos) ? d.videos : [])
+          .map((v) => v as Record<string, unknown>)
+          .filter((v) => typeof v.youtubeId === 'string' && /^[\w-]{6,20}$/.test(v.youtubeId))
+          .map((v) => ({ name: String(v.name ?? 'Trailer'), youtubeId: String(v.youtubeId) })),
+        themes: strings(d.themes),
+        gameModes: strings(d.gameModes),
+        developers: strings(d.developers),
+        publishers: strings(d.publishers),
+        franchises: strings(d.franchises),
+        releases: (Array.isArray(d.releases) ? d.releases : []).map((r) => {
+          const o = r as Record<string, unknown>;
+          return { platform: String(o.platform ?? ''), platformId: typeof o.platformId === 'number' ? o.platformId : null, date: typeof o.date === 'string' ? o.date : null };
+        }),
+        similar: (Array.isArray(d.similar) ? d.similar : []).map((g) => toDiscoverGame(g as Record<string, unknown>)),
+      };
+    } catch (err) {
+      if (err instanceof RetroArrError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async discoverOptions(): Promise<{ genres: DiscoverOption[]; themes: DiscoverOption[]; gameModes: DiscoverOption[] }> {
+    const o = await this.call<Record<string, unknown>>('GET', '/discover/options');
+    const list = (v: unknown): DiscoverOption[] =>
+      (Array.isArray(v) ? v : []).map((x) => x as Record<string, unknown>).map((x) => ({ id: Number(x.id), name: String(x.name ?? '') })).filter((x) => x.id > 0 && x.name);
+    return { genres: list(o.genres), themes: list(o.themes), gameModes: list(o.gameModes) };
+  }
+
+  async recentlyAdded(limit: number): Promise<RetroArrDiscoverGame[]> {
+    const res = await this.call<{ games?: Array<Record<string, unknown>> }>('GET', `/discover/library/recent?limit=${limit}`);
+    return (res.games ?? []).map(toDiscoverGame);
   }
 
   // Searches the indexers and grabs a release that scores high enough. Can take a while.

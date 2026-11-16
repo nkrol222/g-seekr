@@ -194,6 +194,21 @@ export class Store {
     return this.userById(id);
   }
 
+  // Saved discovery filters, as the JSON the user last applied (null: never saved)
+  userFilters(id: number): unknown {
+    const r = this.db.prepare('SELECT filters FROM users WHERE id = ?').get(id) as { filters: string | null } | undefined;
+    if (!r?.filters) return null;
+    try {
+      return JSON.parse(r.filters) as unknown;
+    } catch {
+      return null;
+    }
+  }
+
+  saveUserFilters(id: number, filters: unknown): void {
+    this.db.prepare('UPDATE users SET filters = ? WHERE id = ?').run(JSON.stringify(filters), id);
+  }
+
   // ---- sessions ----
 
   createSession(idHash: string, userId: number, expiresAt: Date): void {

@@ -477,3 +477,78 @@ describe('progress and problem reports', () => {
     expect((await built.app.inject({ method: 'POST', url: `/api/requests/${id}/issues`, headers: alice.headers, payload: { kind: 'wont_launch' } })).statusCode).toBe(201);
   });
 });
+
+describe('discovery', () => {
+  const games = (headers: Record<string, string>, payload: Record<string, unknown>) =>
+    built.app.inject({ method: 'POST', url: '/api/discover/games', headers, payload });
+
+  it('lists games on requestable platforms only, with what the library and the requests have', async () => {
+    await start();
+    const alice = await login('alice');
+    fakes.platforms.push({ id: 77, name: 'Arcade', slug: 'arcade', category: 'X', enabled: true });
+    await start({ ALLOWED_PLATFORMS: 'snes,psx' }); // the allow-list leaves Arcade out
+    const a = await login('alice');
+    await built.app.inject({ method: 'POST', url: '/api/requests', headers: a.headers, payload: { igdbId: 1020, platformId: 41 } });
+
+    const res = await games(a.headers, { list: 'popular', filters: { includeAdult: false } });
+    expect(res.statusCode).toBe(200);
+    expect(fakes.discoverBodies.at(-1)).toMatchObject({ list: 'popular', sort: 'popular', platformIds: [50, 41], includeAdult: false, offset: 0, limit: 30 });
+    const chrono = res.json().games.find((g: { igdbId: number }) => g.igdbId === 1020);
+    expect(chrono).toMatchObject({ title: 'Chrono Trigger', owned: false, platformIds: [41, 50], requests: [{ platformId: 41, status: 'pending' }] });
+    expect(alice).toBeTruthy();
+  });
+
+  it('narrows to the filter’s platforms, or one row’s, but never past what can be requested', async () => {
+    await start();
+    const a = await login('alice');
+    await games(a.headers, { list: 'browse', sort: 'rating', page: 2, filters: { platformIds: [41, 60, 999], genreIds: [12, -1, 'x'], yearFrom: 1999, yearTo: 1990, minRating: 80, includeAdult: true } });
+    expect(fakes.discoverBodies.at(-1)).toMatchObject({
+      list: 'browse', sort: 'rating', platformIds: [41], genreIds: [12], yearFrom: 1990, yearTo: 1999, minRating: 80, includeAdult: true, offset: 30,
+    });
+    await games(a.headers, { list: 'popular', platformId: 50 });
+    expect(fakes.discoverBodies.at(-1)!.platformIds).toEqual([50]);
+    // A disabled platform's row asks for nothing
+    const calls = fakes.discoverBodies.length;
+    expect((await games(a.headers, { list: 'popular', platformId: 60 })).json()).toEqual({ games: [], page: 1, more: false });
+    expect(fakes.discoverBodies.length).toBe(calls);
+    expect((await games(a.headers, { query: 'x'.repeat(101) })).statusCode).toBe(400);
+  });
+
+  it('saves each user’s filters, with adult games off until they switch them on', async () => {
+    await start();
+    const a = await login('alice');
+    expect((await built.app.inject({ url: '/api/me/filters', headers: a.headers })).json().filters).toMatchObject({ includeAdult: false, platformIds: [] });
+    const saved = await built.app.inject({ method: 'PUT', url: '/api/me/filters', headers: a.headers, payload: { filters: { includeAdult: true, minRating: 500, themeIds: [42] } } });
+    expect(saved.json().filters).toMatchObject({ includeAdult: true, minRating: null, themeIds: [42] });
+    expect((await built.app.inject({ url: '/api/me/filters', headers: a.headers })).json().filters.includeAdult).toBe(true);
+    const b = await login('bob');
+    expect((await built.app.inject({ url: '/api/me/filters', headers: b.headers })).json().filters.includeAdult).toBe(false);
+  });
+
+  it('shows a game’s page with requestable releases, safe trailers and similar games that can be requested', async () => {
+    await start();
+    const a = await login('alice');
+    const res = await built.app.inject({ url: '/api/games/1020', headers: a.headers });
+    expect(res.statusCode).toBe(200);
+    const page = res.json();
+    expect(page.game).toMatchObject({ title: 'Chrono Trigger', platformIds: [41, 50] });
+    expect(page.videos).toEqual([{ name: 'Trailer', youtubeId: 'abcdefghijk' }]);
+    expect(page.releases.map((r: { platform: string; requestable: boolean }) => [r.platform, r.requestable])).toEqual([
+      ['Platform 41', true],
+      ['Platform 50', true],
+      ['Arcade', false],
+    ]);
+    expect(page.similar.map((g: { title: string }) => g.title)).toEqual(['Final Fantasy VII']);
+    expect(fakes.calls).toContain('GET /discover/games/1020?includeAdult=false');
+    expect((await built.app.inject({ url: '/api/games/5', headers: a.headers })).statusCode).toBe(404);
+  });
+
+  it('says plainly when IGDB can’t be reached', async () => {
+    await start();
+    const a = await login('alice');
+    fakes.igdbDown = true;
+    const res = await games(a.headers, { list: 'top' });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error).toBe('IGDB didn’t answer; try again in a moment.');
+  });
+});
