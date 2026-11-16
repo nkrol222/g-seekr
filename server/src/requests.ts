@@ -14,6 +14,15 @@ export class RequestError extends Error {
   }
 }
 
+// The data of a RetroArr webhook: the game's ids first, then the event's own fields
+export interface RetroArrEventData {
+  gameId?: unknown;
+  release?: unknown;
+  reason?: unknown;
+  stage?: unknown;
+  [key: string]: unknown;
+}
+
 export interface Logger {
   info: (msg: string) => void;
   warn: (msg: string) => void;
@@ -196,6 +205,7 @@ export class RequestService {
       const updated = this.store.updateRequest(request.id, {
         status: game.status === 'Downloading' ? 'downloading' : 'searching',
         retroarrGameId: game.id,
+        release: null,
         error: null,
       })!;
       this.log.info(`request ${request.id}: in RetroArr as game ${game.id}, searching`);
@@ -226,13 +236,57 @@ export class RequestService {
           continue;
         }
         const next: RequestStatus = game.status === 'Downloaded' ? 'available' : game.status === 'Downloading' ? 'downloading' : 'searching';
+        // RetroArr's game status says nothing of a grab: a request a webhook marked downloading stays so
+        // until the import or failure webhook (or the import itself) moves it on
+        const grabbed = request.status === 'downloading' && request.release !== null && next === 'searching';
         if (next === 'available') this.markAvailable(request, game.id);
-        else if (next !== request.status) this.store.updateRequest(request.id, { status: next });
+        else if (next !== request.status && !grabbed) this.store.updateRequest(request.id, { status: next });
       } catch (err) {
         // RetroArr down: leave the request as it is and try again next time
         this.log.warn(`poll: request ${request.id}: ${(err as Error).message}`);
       }
     }
+  }
+
+  // RetroArr's webhooks, for every request it is working on for that game. The poller stays as the backstop for a
+  // webhook that never arrives. Returns how many requests changed.
+  handleRetroArrEvent(event: string, data: RetroArrEventData): number {
+    const gameId = typeof data.gameId === 'number' ? data.gameId : null;
+    if (gameId === null) return 0;
+    const affected = this.store
+      .listRequests({ statuses: TRACKED_STATUSES })
+      .filter((r) => r.retroarrGameId === gameId);
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    for (const request of affected) {
+      switch (event) {
+        case 'OnDownloadStarted':
+          this.store.updateRequest(request.id, { status: 'downloading', release: text(data.release), error: null });
+          this.log.info(`request ${request.id}: RetroArr grabbed ${text(data.release) ?? 'a release'}`);
+          break;
+        case 'OnDownloadCompleted':
+          this.markAvailable(request, gameId);
+          break;
+        case 'OnDownloadFailed': {
+          // RetroArr blocklists the release and searches again on its own: the request goes on
+          const reason = text(data.reason);
+          const updated = this.store.updateRequest(request.id, {
+            status: 'searching',
+            error: `The last download failed${reason ? `: ${reason}` : ''}. RetroArr is searching again.`,
+          })!;
+          this.log.warn(`request ${request.id}: download failed (${data.stage ?? 'download'}): ${reason ?? 'no reason given'}`);
+          void this.notifier.downloadFailed(updated, reason);
+          break;
+        }
+        case 'OnGameRemoved': {
+          const failed = this.store.updateRequest(request.id, { status: 'failed', error: 'The game was removed from RetroArr.' })!;
+          void this.notifier.statusChanged(failed);
+          break;
+        }
+        default:
+          return 0;
+      }
+    }
+    return affected.length;
   }
 
   private markAvailable(request: GameRequest, gameId: number): GameRequest {

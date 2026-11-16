@@ -8,6 +8,13 @@ export function StatusBadge({ request }: { request: GameRequest }) {
   return <span className={`badge ${request.status}`}>{STATUS_LABEL[request.status]}</span>;
 }
 
+// What RetroArr is doing about it: the release it is downloading, or why the last download failed
+export function StatusDetail({ request }: { request: GameRequest }) {
+  if (request.status === 'downloading' && request.release) return <p className="muted small">Downloading {request.release}</p>;
+  if (request.status === 'searching' && request.error) return <p className="error small">{request.error}</p>;
+  return null;
+}
+
 export function when(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : '';
 }

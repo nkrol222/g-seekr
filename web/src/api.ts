@@ -35,6 +35,8 @@ export interface GameRequest {
   year: number | null;
   coverUrl: string | null;
   status: RequestStatus;
+  // What RetroArr grabbed for it
+  release: string | null;
   note: string | null;
   error: string | null;
   createdAt: string;
