@@ -209,6 +209,54 @@ export class Store {
     this.db.prepare('UPDATE users SET filters = ? WHERE id = ?').run(JSON.stringify(filters), id);
   }
 
+  // ---- likes, "not interested", RomM links ----
+
+  likes(userId: number): { igdbId: number; title: string; createdAt: string }[] {
+    return (this.db.prepare('SELECT igdb_id, title, created_at FROM likes WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Row[]).map((r) => ({
+      igdbId: Number(r.igdb_id),
+      title: String(r.title),
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  setLike(userId: number, igdbId: number, title: string, liked: boolean): void {
+    if (liked) this.db.prepare('INSERT OR IGNORE INTO likes (user_id, igdb_id, title, created_at) VALUES (?, ?, ?, ?)').run(userId, igdbId, title, this.ts());
+    else this.db.prepare('DELETE FROM likes WHERE user_id = ? AND igdb_id = ?').run(userId, igdbId);
+  }
+
+  dismissed(userId: number): Set<number> {
+    return new Set((this.db.prepare('SELECT igdb_id FROM dismissed WHERE user_id = ?').all(userId) as Row[]).map((r) => Number(r.igdb_id)));
+  }
+
+  setDismissed(userId: number, igdbId: number, dismissed: boolean): void {
+    if (dismissed) this.db.prepare('INSERT OR IGNORE INTO dismissed (user_id, igdb_id, created_at) VALUES (?, ?, ?)').run(userId, igdbId, this.ts());
+    else this.db.prepare('DELETE FROM dismissed WHERE user_id = ? AND igdb_id = ?').run(userId, igdbId);
+  }
+
+  rommLink(userId: number): { token: string; rommUsername: string; linkedAt: string; lastError: string | null } | null {
+    const r = this.db.prepare('SELECT * FROM romm_links WHERE user_id = ?').get(userId) as Row | undefined;
+    return r
+      ? { token: String(r.token), rommUsername: String(r.romm_username), linkedAt: String(r.linked_at), lastError: r.last_error == null ? null : String(r.last_error) }
+      : null;
+  }
+
+  setRommLink(userId: number, token: string, rommUsername: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO romm_links (user_id, token, romm_username, linked_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET token = excluded.token, romm_username = excluded.romm_username, linked_at = excluded.linked_at, last_error = NULL`,
+      )
+      .run(userId, token, rommUsername, this.ts());
+  }
+
+  setRommError(userId: number, error: string | null): void {
+    this.db.prepare('UPDATE romm_links SET last_error = ? WHERE user_id = ?').run(error, userId);
+  }
+
+  deleteRommLink(userId: number): void {
+    this.db.prepare('DELETE FROM romm_links WHERE user_id = ?').run(userId);
+  }
+
   // ---- sessions ----
 
   createSession(idHash: string, userId: number, expiresAt: Date): void {

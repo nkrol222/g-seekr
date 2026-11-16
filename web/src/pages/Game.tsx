@@ -12,6 +12,7 @@ export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested:
   const [pending, setPending] = useState<number | null>(null);
   const [showStory, setShowStory] = useState(false);
   const [trailer, setTrailer] = useState<string | null>(null);
+  const [mine, setMine] = useState<{ liked: boolean; dismissed: boolean }>({ liked: false, dismissed: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -22,7 +23,11 @@ export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested:
     window.scrollTo(0, 0);
     api
       .game(igdbId)
-      .then((p) => !cancelled && setPage(p))
+      .then((p) => {
+        if (cancelled) return;
+        setPage(p);
+        setMine(p.mine ?? { liked: false, dismissed: false });
+      })
       .catch((err: Error) => !cancelled && setError(err.message));
     api
       .platforms()
@@ -48,6 +53,18 @@ export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested:
     } finally {
       setPending(null);
     }
+  };
+
+  const like = async () => {
+    if (!page) return;
+    const liked = !mine.liked;
+    setMine({ liked, dismissed: liked ? false : mine.dismissed });
+    await api.like(igdbId, liked, page.game.title).catch(() => setMine(mine));
+  };
+  const notInterested = async () => {
+    const dismissed = !mine.dismissed;
+    setMine({ liked: dismissed ? false : mine.liked, dismissed });
+    await api.dismiss(igdbId, dismissed).catch(() => setMine(mine));
   };
 
   if (error && !page) return <Alert kind="error">{error}</Alert>;
@@ -84,6 +101,14 @@ export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested:
           <h1>
             {g.title} {g.year && <span>({g.year})</span>}
           </h1>
+          <div className="game-actions">
+            <button type="button" className={mine.liked ? 'btn liked' : 'btn'} aria-pressed={mine.liked} onClick={like}>
+              <Icon name="heart" /> {mine.liked ? 'Liked' : 'Like'}
+            </button>
+            <button type="button" className={mine.dismissed ? 'btn dismissed' : 'btn ghost'} aria-pressed={mine.dismissed} onClick={notInterested}>
+              <Icon name="eyeSlash" /> {mine.dismissed ? 'Not interested' : 'Not interested?'}
+            </button>
+          </div>
           <p className="game-sub">
             {g.genres.slice(0, 3).join(', ')}
             {g.rating != null && (
@@ -211,6 +236,23 @@ export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested:
         </aside>
       </div>
 
+      {[
+        ['More from this series', page.series ?? []],
+        [page.developer ? `More from ${page.developer}` : 'More from the developer', page.fromDeveloper ?? []],
+      ].map(([title, games]) =>
+        (games as typeof page.similar).length > 0 ? (
+          <section key={title as string} className="slider">
+            <div className="slider-head">
+              <h2>{title as string}</h2>
+            </div>
+            <div className="slider-track">
+              {(games as typeof page.similar).map((s) => (
+                <TitleCard key={s.igdbId} game={s} />
+              ))}
+            </div>
+          </section>
+        ) : null,
+      )}
       {page.similar.length > 0 && (
         <section className="slider">
           <div className="slider-head">

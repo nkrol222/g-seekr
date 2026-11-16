@@ -21,8 +21,8 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 | Discover page with sliders: trending, popular, upcoming, recently added | Done: popular right now (IGDB popularity), top rated, recently added to the library, popular per requestable platform, plus request rows | Upcoming releases (left out for now) | – |
 | Browse by genre, studio or network | Done: a Browse page and filtered search, with platform, genre, year range, rating and rating count, game mode, theme, and an adult-games switch (off by default). Filters are saved per user | Developer or publisher, franchise | – |
 | Detail page per title: overview, cast, trailers, ratings, where it's available | Done: a game page with backdrop, summary and story, request per platform, trailers, screenshots, facts, first release per platform, similar games | – | – |
-| "Recommendations" and "Similar" on each title | None | IGDB's `similar_games` and franchise or collection siblings on the game page | IGDB |
-| Personal recommendations (from your watch history and watchlist) | None | "Because you requested X": similar games to your past requests. "Because you played X": RomM play history (RomM keeps per-user data such as last played; what its API exposes needs checking), matched by IGDB id. Ranked by IGDB rating, filtered to platforms you can request, minus what's already in the library or requested | IGDB; RomM API access (a RomM token for g-seekr) |
+| "Recommendations" and "Similar" on each title | Done: similar games, more from the series and more from the developer on the game page | – | – |
+| Personal recommendations (from your watch history and watchlist) | Done: a For you page and Discover rows from requests, likes and RomM play history (each user links their own RomM token), with the reasons; "not interested" hides a game | Weigh what the household plays | – |
 | Watchlist, with auto-request from a Plex/Jellyfin watchlist | None | A "want to play" list per user, with optional auto-request when a game releases. Pairs with upcoming releases | RSS, so a new release is grabbed promptly |
 | Hide titles (blocklist) | None | Admins hide a game or a whole platform from discovery and search | – |
 
@@ -76,7 +76,7 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 
 1. ~~**Live status and issues.**~~ Done: progress in percent, failure reasons, problem reports with a one-click replace.
 2. ~~**Discovery basics.**~~ Done: Discover rows, Browse with filters, filtered search and a game page, from IGDB through RetroArr (its requests scope).
-3. **Recommendations:** similar games on the detail page, then "because you requested" and "because you played", the latter from RomM.
+3. ~~**Recommendations.**~~ Done: For you page, Discover rows, game page rows, likes, "not interested", RomM history.
 4. **Request options**, once A4 lands: a release preference per request.
 5. **Permissions, notifications and settings UI**, as more people use it.
 6. **Watchlist** with auto-request on release, after RetroArr's RSS sync.

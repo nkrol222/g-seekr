@@ -3,6 +3,8 @@
 export const JELLYFIN = 'http://jellyfin.test';
 export const RETROARR = 'http://retroarr.test';
 export const DISCORD = 'http://discord.test/webhook';
+export const ROMM = 'http://romm.test';
+export const ROMM_TOKEN = 'rmm_' + 'a'.repeat(64);
 export const TOKEN = 'rat_' + 'x'.repeat(43);
 
 export interface FakeGame {
@@ -48,7 +50,13 @@ export class Fakes {
   replaced: Array<{ gameId: number; reason: string }> = [];
   // The bodies of POST /discover/games, and whether IGDB is "down"
   discoverBodies: Array<Record<string, unknown>> = [];
+  // RomM: client tokens to their users, and each user's play history
+  rommTokens = new Map<string, string>([[ROMM_TOKEN, 'alice']]);
+  rommPlays = new Map<string, Array<{ igdb_id: number | null; name: string; rom_user: Record<string, unknown> }>>();
+  rommDown = false;
   igdbDown = false;
+  // IGDB's similar games per game; unset = every other game in the catalogue
+  similar = new Map<number, number[]>();
 
   fetch: typeof fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
@@ -59,6 +67,19 @@ export class Fakes {
     if (url.href === DISCORD) {
       this.discord.push(body);
       return new Response(null, { status: 204 });
+    }
+
+    if (url.origin === ROMM) {
+      if (this.rommDown) throw new TypeError('fetch failed');
+      const token = new Headers(init?.headers).get('authorization')?.replace(/^Bearer /, '') ?? '';
+      const user = this.rommTokens.get(token);
+      if (!user) return json({ detail: 'Forbidden' }, 403);
+      if (url.pathname === '/api/users/me') return json({ id: 1, username: user });
+      if (url.pathname === '/api/roms') {
+        this.calls.push(`ROMM ${url.search}`);
+        return json({ items: this.rommPlays.get(user) ?? [], limit: 100, offset: 0, total: null });
+      }
+      return json({ detail: 'Not found' }, 404);
     }
 
     if (url.origin === JELLYFIN) {
@@ -146,7 +167,10 @@ export class Fakes {
           publishers: ['Square'],
           franchises: [],
           releases: g.platforms.map((p) => ({ platform: `Platform ${p}`, platformId: p, date: `${g.year}-03-11` })).concat([{ platform: 'Arcade', platformId: null, date: null } as never]),
-          similar: [...others.map(([id, o]) => this.discoverGame(id, o)), { ...this.discoverGame(9999, { title: 'Elsewhere', year: 2001, platforms: [77] }) }],
+          similar: [...(this.similar.get(Number(m[1])) ?? others.map(([id]) => id)).map((id) => this.discoverGame(id, this.catalogue.get(id)!)), { ...this.discoverGame(9999, { title: 'Elsewhere', year: 2001, platforms: [77] }) }],
+          series: [],
+          developer: 'Square',
+          fromDeveloper: others.slice(0, 1).map(([id, o]) => this.discoverGame(id, o)),
         });
       }
       if (path === '/discover/options') return json({ genres: [{ id: 12, name: 'Role-playing (RPG)' }], themes: [{ id: 42, name: 'Erotic' }], gameModes: [{ id: 1, name: 'Single player' }] });

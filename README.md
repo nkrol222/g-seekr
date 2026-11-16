@@ -60,6 +60,19 @@ their defaults. `JELLYFIN_URL`, `RETROARR_URL` and `RETROARR_TOKEN` are required
 To create the RetroArr token: RetroArr → **Settings → API access → Tokens for other apps**.
 Name it `g-seekr`, tick only `requests`, and copy the `rat_…` value. It's shown once.
 
+### Recommendations and RomM
+
+The **For you** page and Discover's "Recommended for you" and "Because you …" rows come from
+each user's requests, likes (♥ on a game's page) and, once they link it, their RomM history: IGDB's
+similar games and series for each, best shared first. A game rated 1–3 in RomM, or marked "not
+interested", never comes back. The user's saved filters apply, except themes and game modes.
+
+Linking RomM needs `ROMM_API_URL` (RomM's API as g-seekr reaches it, e.g. its tailnet URL). Each
+user then makes a client token in RomM (**Settings → Client API Tokens**, scopes "View your
+profile" and "View ROMs") and pastes it under **Account → RomM link**. g-seekr checks that the
+token's RomM username is the user's own (usernames match between Jellyfin and RomM), keeps it in
+its database, and never sends it back to the browser.
+
 ### RetroArr webhook
 
 So requests update the moment RetroArr grabs, imports or fails a download:

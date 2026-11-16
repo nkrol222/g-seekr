@@ -4,12 +4,13 @@ import { Login } from './pages/Login';
 import { Discover } from './pages/Discover';
 import { GameGrid, Search } from './pages/Search';
 import { GamePage } from './pages/Game';
+import { ForYou, RommLinkDialog } from './pages/ForYou';
 import { isFilter, Requests } from './pages/Requests';
 import { AdminUsers } from './pages/AdminUsers';
 import { Issues } from './pages/Issues';
 import { Avatar, Icon, Mark, type IconName } from './pages/shared';
 
-type View = 'discover' | 'browse' | 'search' | 'game' | 'requests' | 'issues' | 'users';
+type View = 'discover' | 'for-you' | 'browse' | 'search' | 'game' | 'requests' | 'issues' | 'users';
 
 interface Route {
   view: View;
@@ -26,7 +27,7 @@ const parseHash = (): Route => {
     params.set('id', game[1]!);
     return { view: 'game', params };
   }
-  const view = (['browse', 'search', 'requests', 'issues', 'users'] as const).find((v) => v === path) ?? 'discover';
+  const view = (['for-you', 'browse', 'search', 'requests', 'issues', 'users'] as const).find((v) => v === path) ?? 'discover';
   // #/mine and #/queue were the old requests pages
   return { view: path === 'mine' || path === 'queue' ? 'requests' : view, params };
 };
@@ -79,6 +80,7 @@ export function App() {
           platformId={Number(route.params.get('platform')) || undefined}
         />
       )}
+      {view === 'for-you' && <ForYou />}
       {view === 'game' && <GamePage igdbId={Number(route.params.get('id'))} onRequested={refreshMe} />}
       {view === 'requests' && <Requests me={me} filter={isFilter(filter) ? filter : admin ? 'open' : 'all'} onChanged={refreshMe} />}
       {view === 'issues' && <Issues me={me} onChanged={refreshMe} />}
@@ -106,6 +108,7 @@ function Shell({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  const [rommOpen, setRommOpen] = useState(false);
   const [text, setText] = useState(query);
   const userRef = useRef<HTMLDivElement>(null);
 
@@ -125,6 +128,7 @@ function Shell({
 
   const links: { id: View; label: string; icon: IconName; href: string; count?: number }[] = [
     { id: 'discover', label: 'Discover', icon: 'sparkles', href: '#/' },
+    { id: 'for-you', label: 'For you', icon: 'heart', href: '#/for-you' },
     { id: 'browse', label: 'Browse', icon: 'squares', href: '#/browse' },
     { id: 'requests', label: me.user.isAdmin ? 'Requests' : 'My requests', icon: 'clock', href: '#/requests', count: me.user.isAdmin ? pending : 0 },
     { id: 'issues', label: me.user.isAdmin ? 'Issues' : 'My problems', icon: 'flag', href: '#/issues', count: me.user.isAdmin ? openIssues : 0 },
@@ -182,6 +186,17 @@ function Shell({
                   type="button"
                   role="menuitem"
                   className="btn ghost"
+                  onClick={() => {
+                    setUserOpen(false);
+                    setRommOpen(true);
+                  }}
+                >
+                  <Icon name="play" /> RomM link
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="btn ghost"
                   onClick={async () => {
                     await api.logout().catch(() => undefined);
                     onSignOut();
@@ -194,6 +209,7 @@ function Shell({
           </div>
         </header>
         <main className="content">{children}</main>
+        {rommOpen && <RommLinkDialog onClose={() => setRommOpen(false)} onChanged={() => undefined} />}
       </div>
     </>
   );

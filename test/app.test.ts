@@ -4,7 +4,7 @@ import { loadConfig, type Config } from '../server/src/config.js';
 import { openDb } from '../server/src/db.js';
 import { JellyfinClient } from '../server/src/jellyfin.js';
 import { RetroArrClient } from '../server/src/retroarr.js';
-import { DISCORD, Fakes, JELLYFIN, RETROARR, TOKEN } from './fakes.js';
+import { DISCORD, Fakes, JELLYFIN, RETROARR, ROMM, ROMM_TOKEN, TOKEN } from './fakes.js';
 
 const H = { 'x-gseekr': '1' };
 type App = Awaited<ReturnType<typeof buildApp>>;
@@ -550,5 +550,97 @@ describe('discovery', () => {
     const res = await games(a.headers, { list: 'top' });
     expect(res.statusCode).toBe(503);
     expect(res.json().error).toBe('IGDB didn’t answer; try again in a moment.');
+  });
+});
+
+describe('recommendations', () => {
+  // Chrono Trigger's similar games are Secret of Mana and Final Fantasy VI; Final Fantasy VII's are Final Fantasy VI and Xenogears
+  function catalogue() {
+    fakes.catalogue.set(1079, { title: 'Secret of Mana', year: 1993, platforms: [41] });
+    fakes.catalogue.set(1009, { title: 'Final Fantasy VI', year: 1994, platforms: [41] });
+    fakes.catalogue.set(1500, { title: 'Xenogears', year: 1998, platforms: [50] });
+    fakes.similar.set(1020, [1079, 1009]);
+    fakes.similar.set(427, [1009, 1500]);
+    fakes.similar.set(1009, [1079]);
+  }
+  const recs = async (headers: Record<string, string>) => (await built.app.inject({ url: '/api/recommendations', headers })).json();
+  const titles = (games: { title: string }[]) => games.map((g) => g.title);
+
+  it('recommends from requests and likes, best shared first, with the reasons', async () => {
+    catalogue();
+    await start();
+    const a = await login('alice');
+    await built.app.inject({ method: 'POST', url: '/api/requests', headers: a.headers, payload: { igdbId: 1020, platformId: 41 } });
+    await built.app.inject({ method: 'PUT', url: '/api/games/427/like', headers: a.headers, payload: { liked: true, title: 'Final Fantasy VII' } });
+
+    const r = await recs(a.headers);
+    // FF VI is similar to both; the liked FF VII counts more than the request
+    expect(titles(r.games)).toEqual(['Final Fantasy VI', 'Xenogears', 'Secret of Mana']);
+    expect(r.games[0].reasons).toEqual([
+      { kind: 'liked', igdbId: 427, title: 'Final Fantasy VII' },
+      { kind: 'requested', igdbId: 1020, title: 'Chrono Trigger' },
+    ]);
+    expect(r.because.map((b: { seed: { title: string } }) => b.seed.title)).toEqual([]); // fewer than 4 each
+    expect(r.romm).toEqual({ available: false, linked: false, error: null });
+    // The game page says what the user thinks of it
+    expect((await built.app.inject({ url: '/api/games/427', headers: a.headers })).json().mine).toEqual({ liked: true, dismissed: false });
+  });
+
+  it('leaves out games marked not interested, and follows the saved filters', async () => {
+    catalogue();
+    await start();
+    const a = await login('alice');
+    await built.app.inject({ method: 'PUT', url: '/api/games/427/like', headers: a.headers, payload: { liked: true, title: 'Final Fantasy VII' } });
+    expect(titles((await recs(a.headers)).games)).toEqual(['Final Fantasy VI', 'Xenogears']);
+
+    await built.app.inject({ method: 'PUT', url: '/api/games/1009/dismiss', headers: a.headers, payload: { dismissed: true } });
+    expect(titles((await recs(a.headers)).games)).toEqual(['Xenogears']);
+
+    await built.app.inject({ method: 'PUT', url: '/api/me/filters', headers: a.headers, payload: { filters: { platformIds: [41] } } });
+    await built.app.inject({ method: 'PUT', url: '/api/games/1009/dismiss', headers: a.headers, payload: { dismissed: false } });
+    // Xenogears is PlayStation only
+    expect(titles((await recs(a.headers)).games)).toEqual(['Final Fantasy VI']);
+  });
+
+  it('links RomM with the user’s own token, and recommends from what they played', async () => {
+    catalogue();
+    await start({ ROMM_API_URL: ROMM });
+    const a = await login('alice');
+    const link = (token: string) => built.app.inject({ method: 'PUT', url: '/api/me/romm', headers: a.headers, payload: { token } });
+
+    expect((await link('nope')).json().error).toMatch(/isn’t a RomM client token/);
+    fakes.rommTokens.set('rmm_' + 'b'.repeat(64), 'bob');
+    expect((await link('rmm_' + 'b'.repeat(64))).json().error).toBe('That token belongs to RomM user “bob”, not you (alice).');
+    expect((await link('rmm_' + 'c'.repeat(64))).json().error).toMatch(/RomM refused the token/);
+    const linked = await link(ROMM_TOKEN);
+    expect(linked.statusCode).toBe(200);
+    expect(linked.json()).toMatchObject({ available: true, linked: true, rommUsername: 'alice' });
+    // The token never comes back
+    expect(JSON.stringify(linked.json())).not.toContain(ROMM_TOKEN);
+
+    fakes.rommPlays.set('alice', [
+      { igdb_id: 1020, name: 'Chrono Trigger', rom_user: { last_played: '2026-11-10T20:00:00Z', rating: 9, now_playing: false } },
+      { igdb_id: 427, name: 'Final Fantasy VII', rom_user: { last_played: '2026-11-01T20:00:00Z', rating: 2, now_playing: false } },
+      { igdb_id: null, name: 'Homebrew', rom_user: { last_played: '2026-11-01T20:00:00Z', rating: 0 } },
+    ]);
+    built.recommend.forgetPlays(1);
+    const r = await recs(a.headers);
+    // Chrono Trigger rated 9 leads; FF VII rated 2 is disliked, so neither it nor its similar Xenogears show
+    expect(titles(r.games)).toEqual(['Secret of Mana', 'Final Fantasy VI']);
+    expect(r.games[0].reasons[0]).toEqual({ kind: 'played', igdbId: 1020, title: 'Chrono Trigger' });
+    expect(fakes.calls.find((c) => c.startsWith('ROMM'))).toContain('order_by=last_played');
+
+    fakes.rommDown = true;
+    built.recommend.forgetPlays(1);
+    expect((await recs(a.headers)).romm).toMatchObject({ linked: true, error: expect.stringMatching(/RomM is not reachable/) });
+
+    expect((await built.app.inject({ method: 'DELETE', url: '/api/me/romm', headers: a.headers })).json()).toMatchObject({ linked: false });
+  });
+
+  it('can’t link RomM without ROMM_API_URL', async () => {
+    await start();
+    const a = await login('alice');
+    expect((await built.app.inject({ url: '/api/me/romm', headers: a.headers })).json()).toMatchObject({ available: false, linked: false });
+    expect((await built.app.inject({ method: 'PUT', url: '/api/me/romm', headers: a.headers, payload: { token: ROMM_TOKEN } })).json().error).toMatch(/isn’t set up/);
   });
 });
