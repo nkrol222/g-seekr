@@ -135,13 +135,20 @@ export class DiscoverService {
   async game(igdbId: number, includeAdult: boolean) {
     const detail = await this.retroarr.discoverGame(igdbId, includeAdult);
     if (!detail) throw new RequestError('That game wasn’t found on IGDB.', 404, 'unknown_game');
-    const [game, ...similar] = await this.cards([detail.game, ...detail.similar]);
+    const all = await this.cards([detail.game, ...detail.similar, ...detail.series, ...detail.fromDeveloper]);
+    const game = all[0]!;
+    const similar = all.slice(1, 1 + detail.similar.length);
+    const series = all.slice(1 + detail.similar.length, 1 + detail.similar.length + detail.series.length);
+    const fromDeveloper = all.slice(1 + detail.similar.length + detail.series.length);
     const requestable = new Map((await this.requests.platforms()).map((p) => [p.id, p.name]));
+    // Games that can't be requested anywhere here aren't worth a poster
+    const askable = (list: DiscoverCard[]) => list.filter((g) => g.platformIds.length > 0);
     return {
       ...detail,
-      game: game!,
-      // Similar games that can't be requested anywhere here aren't worth a poster
-      similar: similar.filter((g) => g.platformIds.length > 0),
+      game,
+      similar: askable(similar),
+      series: askable(series),
+      fromDeveloper: askable(fromDeveloper),
       releases: detail.releases.map((r) => ({ ...r, requestable: r.platformId !== null && requestable.has(r.platformId) })),
     };
   }

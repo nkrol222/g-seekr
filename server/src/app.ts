@@ -13,6 +13,8 @@ import { RetroArrError, type RetroArrClient } from './retroarr.js';
 import { RequestError, RequestService } from './requests.js';
 import { IssueService, isIssueKind } from './issues.js';
 import { DiscoverService } from './discover.js';
+import { RecommendService } from './recommend.js';
+import { RommClient, RommError } from './romm.js';
 import { Store, type User } from './store.js';
 
 declare module 'fastify' {
@@ -57,6 +59,8 @@ export async function buildApp(deps: AppDeps) {
   const requests = new RequestService(config, store, deps.retroarr, notifier, log, deps.now);
   const issues = new IssueService(store, deps.retroarr, notifier, log, (u) => requests.isAdmin(u), deps.now);
   const discover = new DiscoverService(store, deps.retroarr, requests);
+  const romm = config.rommApiUrl ? new RommClient(config.rommApiUrl, deps.fetchImpl) : null;
+  const recommend = new RecommendService(config, store, discover, romm, log, deps.now);
   const limiter = new LoginLimiter();
 
   app.decorate('requestService', requests);
@@ -210,10 +214,59 @@ export async function buildApp(deps: AppDeps) {
     async (req) => discover.games(req.body ?? {}),
   );
 
+  const gameId = (raw: string): number | null => {
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  };
+
   app.get<{ Params: { igdbId: string } }>('/api/games/:igdbId', async (req, reply) => {
-    const igdbId = Number(req.params.igdbId);
-    if (!Number.isInteger(igdbId) || igdbId <= 0) return reply.code(404).send({ error: 'Game not found.' });
-    return discover.game(igdbId, discover.filtersFor(req.user!).includeAdult);
+    const igdbId = gameId(req.params.igdbId);
+    if (igdbId === null) return reply.code(404).send({ error: 'Game not found.' });
+    const page = await discover.game(igdbId, discover.filtersFor(req.user!).includeAdult);
+    const liked = store.likes(req.user!.id).some((l) => l.igdbId === igdbId);
+    return { ...page, mine: { liked, dismissed: store.dismissed(req.user!.id).has(igdbId) } };
+  });
+
+  // ---- recommendations ----
+
+  app.get('/api/recommendations', async (req) => recommend.forUser(req.user!));
+
+  app.put<{ Params: { igdbId: string }; Body: { liked?: unknown; title?: unknown } }>('/api/games/:igdbId/like', async (req, reply) => {
+    const igdbId = gameId(req.params.igdbId);
+    if (igdbId === null || typeof req.body?.liked !== 'boolean') return reply.code(400).send({ error: 'Say whether you like it.' });
+    const title = typeof req.body.title === 'string' ? req.body.title.trim().slice(0, 200) : '';
+    store.setLike(req.user!.id, igdbId, title || `Game ${igdbId}`, req.body.liked);
+    if (req.body.liked) store.setDismissed(req.user!.id, igdbId, false);
+    recommend.forget(req.user!.id);
+    return { liked: req.body.liked };
+  });
+
+  app.put<{ Params: { igdbId: string }; Body: { dismissed?: unknown } }>('/api/games/:igdbId/dismiss', async (req, reply) => {
+    const igdbId = gameId(req.params.igdbId);
+    if (igdbId === null || typeof req.body?.dismissed !== 'boolean') return reply.code(400).send({ error: 'Say whether you’re interested.' });
+    store.setDismissed(req.user!.id, igdbId, req.body.dismissed);
+    if (req.body.dismissed) store.setLike(req.user!.id, igdbId, '', false);
+    recommend.forget(req.user!.id);
+    return { dismissed: req.body.dismissed };
+  });
+
+  app.get('/api/me/romm', async (req) => recommend.rommStatus(req.user!));
+
+  app.put<{ Body: { token?: unknown } }>('/api/me/romm', async (req, reply) => {
+    if (typeof req.body?.token !== 'string') return reply.code(400).send({ error: 'Paste your RomM client token.' });
+    try {
+      await recommend.link(req.user!, req.body.token);
+    } catch (err) {
+      if (err instanceof RommError) return reply.code(err.status === 0 || err.status >= 500 ? 502 : 400).send({ error: err.message });
+      throw err;
+    }
+    req.log.info(`${req.user!.username} linked RomM`);
+    return recommend.rommStatus(req.user!);
+  });
+
+  app.delete('/api/me/romm', async (req) => {
+    recommend.unlink(req.user!);
+    return recommend.rommStatus(req.user!);
   });
 
   // ---- requests ----
@@ -239,7 +292,9 @@ export async function buildApp(deps: AppDeps) {
     if (!Number.isInteger(igdbId) || igdbId <= 0 || !Number.isInteger(platformId) || platformId <= 0) {
       return reply.code(400).send({ error: 'Pick a game and a platform.' });
     }
-    return reply.code(201).send({ request: await requests.create(req.user!, igdbId, platformId) });
+    const created = await requests.create(req.user!, igdbId, platformId);
+    recommend.forget(req.user!.id);
+    return reply.code(201).send({ request: created });
   });
 
   app.post<{ Params: { id: string } }>('/api/requests/:id/approve', { preHandler: requireAdmin }, async (req) => ({
@@ -334,7 +389,7 @@ export async function buildApp(deps: AppDeps) {
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found.' }));
   }
 
-  return { app, store, requests, issues };
+  return { app, store, requests, issues, recommend };
 }
 
 declare module 'fastify' {

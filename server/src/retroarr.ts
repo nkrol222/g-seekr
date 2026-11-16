@@ -80,6 +80,10 @@ export interface RetroArrDiscoverDetail {
   franchises: string[];
   releases: { platform: string; platformId: number | null; date: string | null }[];
   similar: RetroArrDiscoverGame[];
+  // Other games of its series, and its main developer's other games (empty from an older RetroArr)
+  series: RetroArrDiscoverGame[];
+  developer: string | null;
+  fromDeveloper: RetroArrDiscoverGame[];
 }
 
 function toDiscoverGame(g: Record<string, unknown>): RetroArrDiscoverGame {
@@ -283,6 +287,9 @@ export class RetroArrClient {
           return { platform: String(o.platform ?? ''), platformId: typeof o.platformId === 'number' ? o.platformId : null, date: typeof o.date === 'string' ? o.date : null };
         }),
         similar: (Array.isArray(d.similar) ? d.similar : []).map((g) => toDiscoverGame(g as Record<string, unknown>)),
+        series: (Array.isArray(d.series) ? d.series : []).map((g) => toDiscoverGame(g as Record<string, unknown>)),
+        developer: typeof d.developer === 'string' ? d.developer : null,
+        fromDeveloper: (Array.isArray(d.fromDeveloper) ? d.fromDeveloper : []).map((g) => toDiscoverGame(g as Record<string, unknown>)),
       };
     } catch (err) {
       if (err instanceof RetroArrError && err.status === 404) return null;

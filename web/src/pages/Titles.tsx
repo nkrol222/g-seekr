@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { STATUS_LABEL, type GameCard, type RequestStatus, type SearchResult } from '../api';
-import { Poster, StatusBadge } from './shared';
+import { Icon, Poster, StatusBadge } from './shared';
 
 // The furthest along of a game's requests, for the badge on its card
 const RANK: RequestStatus[] = ['declined', 'failed', 'pending', 'approved', 'searching', 'downloading', 'available'];
@@ -10,11 +10,12 @@ export function cardStatus(game: SearchResult): RequestStatus | null {
   return game.requests.map((r) => r.status).sort((a, b) => RANK.indexOf(b) - RANK.indexOf(a))[0] ?? null;
 }
 
-// A poster like Seerr's: status badge top right, details on hover, the game's page on click
-export function TitleCard({ game }: { game: SearchResult | GameCard }) {
+// A poster like Seerr's: status badge top right, details on hover, the game's page on click. A recommendation also
+// says why, and can be dismissed ("Not interested").
+export function TitleCard({ game, reason, onDismiss }: { game: SearchResult | GameCard; reason?: string; onDismiss?: () => void }) {
   const status = cardStatus(game);
   const rating = 'rating' in game && game.rating != null ? Math.round(game.rating) : null;
-  return (
+  const card = (
     <a
       className="title-card"
       href={`#/game/${game.igdbId}`}
@@ -34,6 +35,18 @@ export function TitleCard({ game }: { game: SearchResult | GameCard }) {
         <span className="cta">{status === 'available' ? 'In the library' : status ? 'View request' : 'Request'}</span>
       </span>
     </a>
+  );
+  if (!reason && !onDismiss) return card;
+  return (
+    <div className="rec-card">
+      {card}
+      {onDismiss && (
+        <button type="button" className="dismiss" title="Not interested" aria-label={`Not interested in ${game.title}`} onClick={onDismiss}>
+          <Icon name="x" />
+        </button>
+      )}
+      {reason && <p className="reason">{reason}</p>}
+    </div>
   );
 }
 

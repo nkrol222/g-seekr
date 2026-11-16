@@ -82,7 +82,44 @@ export interface GamePage {
   franchises: string[];
   releases: { platform: string; platformId: number | null; date: string | null; requestable: boolean }[];
   similar: GameCard[];
+  series: GameCard[];
+  developer: string | null;
+  fromDeveloper: GameCard[];
+  // What the user said about it
+  mine: { liked: boolean; dismissed: boolean };
 }
+
+export type SeedKind = 'requested' | 'played' | 'liked';
+export interface Reason {
+  kind: SeedKind;
+  igdbId: number;
+  title: string;
+}
+
+export interface Recommended extends GameCard {
+  reasons: Reason[];
+}
+
+export interface RommLink {
+  available: boolean;
+  linked: boolean;
+  error: string | null;
+}
+
+export interface Recommendations {
+  games: Recommended[];
+  because: { seed: Reason; games: Recommended[] }[];
+  romm: RommLink;
+  basedOn: number;
+}
+
+export interface RommStatus extends RommLink {
+  rommUsername: string | null;
+  linkedAt: string | null;
+  rommUrl: string | null;
+}
+
+export const REASON_VERB: Record<SeedKind, string> = { requested: 'requested', played: 'played', liked: 'liked' };
 
 export interface GameRequest {
   id: number;
@@ -216,6 +253,12 @@ export const api = {
     call<{ games: GameCard[]; page: number; more: boolean }>('POST', '/discover/games', body),
   recentlyAdded: () => call<{ games: GameCard[] }>('GET', '/discover/recent'),
   game: (igdbId: number) => call<GamePage>('GET', `/games/${igdbId}`),
+  recommendations: () => call<Recommendations>('GET', '/recommendations'),
+  like: (igdbId: number, liked: boolean, title: string) => call<{ liked: boolean }>('PUT', `/games/${igdbId}/like`, { liked, title }),
+  dismiss: (igdbId: number, dismissed: boolean) => call<{ dismissed: boolean }>('PUT', `/games/${igdbId}/dismiss`, { dismissed }),
+  romm: () => call<RommStatus>('GET', '/me/romm'),
+  linkRomm: (token: string) => call<RommStatus>('PUT', '/me/romm', { token }),
+  unlinkRomm: () => call<RommStatus>('DELETE', '/me/romm'),
   users: () => call<{ users: AdminUser[] }>('GET', '/admin/users'),
   updateUser: (id: number, patch: Partial<{ isAdmin: boolean; autoApprove: boolean; requestLimit: number | null }>) =>
     call<{ user: AdminUser }>('PATCH', `/admin/users/${id}`, patch),

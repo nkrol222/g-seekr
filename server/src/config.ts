@@ -12,6 +12,9 @@ export interface Config {
   retroarrWebhookToken: string | null;
   // Where people play; "available" requests link here. Optional.
   rommUrl: string | null;
+  // RomM's API for play history, reachable from g-seekr (on the tailnet: https://apollo.<tailnet>.ts.net:456).
+  // Null = users can't link RomM, and recommendations use requests and likes only.
+  rommApiUrl: string | null;
   discordWebhookUrl: string | null;
   // The app's own public origin (https://games.example.com). When set, state-changing requests
   // from any other Origin are refused.
@@ -91,6 +94,7 @@ export function loadConfig(env: Env = process.env): Config {
     retroarrToken: str('RETROARR_TOKEN'),
     retroarrWebhookToken: optional('RETROARR_WEBHOOK_TOKEN'),
     rommUrl: url('ROMM_URL', false),
+    rommApiUrl: url('ROMM_API_URL', false),
     discordWebhookUrl: url('DISCORD_WEBHOOK_URL', false),
     publicUrl: url('PUBLIC_URL', false),
     secureCookies: bool('SECURE_COOKIES', true),

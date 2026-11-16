@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { api, STATUS_LABEL, type Filters, type GameRequest, type Me, type Platform } from '../api';
 import { useFilters } from './Filters';
 import { Alert, Icon, Poster, StatusBadge } from './shared';
-import { GameRow } from './Titles';
+import { GameRow, TitleCard } from './Titles';
+import { reasonText, useRecommendations } from './ForYou';
 
 // Seerr's Discover: a welcome, then rows of posters. The game rows follow only the user's adult-games switch;
 // the Browse page has the full filters.
@@ -11,6 +12,7 @@ export function Discover({ me }: { me: Me }) {
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { filters } = useFilters();
+  const { recs, dismiss } = useRecommendations();
 
   useEffect(() => {
     api
@@ -47,6 +49,21 @@ export function Discover({ me }: { me: Me }) {
       </section>
       {error && <Alert kind="error">{error}</Alert>}
       {waiting.length > 0 && <RequestRow title="Waiting for approval" requests={waiting} showUser link="#/requests?filter=pending" />}
+      {recs && recs.games.length > 0 && (
+        <section className="slider">
+          <div className="slider-head">
+            <h2>Recommended for you</h2>
+            <a href="#/for-you">
+              View all <span aria-hidden="true">→</span>
+            </a>
+          </div>
+          <div className="slider-track rec-track">
+            {recs.games.slice(0, 20).map((g) => (
+              <TitleCard key={g.igdbId} game={g} reason={reasonText(g)} onDismiss={() => void dismiss(g.igdbId)} />
+            ))}
+          </div>
+        </section>
+      )}
       {filters && (
         <>
           <GameRow title="Popular right now" link="#/browse?list=popular" load={async () => (await api.discover({ list: 'popular', filters: adultOnly })).games} />
@@ -56,6 +73,20 @@ export function Discover({ me }: { me: Me }) {
       )}
       <RequestRow title={me.user.isAdmin ? 'Recent requests' : 'Your recent requests'} requests={recent} showUser={me.user.isAdmin} link="#/requests" />
       <RequestRow title="Ready to play" requests={ready} link="#/requests?filter=available" />
+      {recs?.because.map((b) => (
+        <section key={b.seed.igdbId} className="slider">
+          <div className="slider-head">
+            <h2>
+              Because you {b.seed.kind} <a href={`#/game/${b.seed.igdbId}`}>{b.seed.title}</a>
+            </h2>
+          </div>
+          <div className="slider-track rec-track">
+            {b.games.map((g) => (
+              <TitleCard key={g.igdbId} game={g} onDismiss={() => void dismiss(g.igdbId)} />
+            ))}
+          </div>
+        </section>
+      ))}
       {filters &&
         platforms.map((p) => (
           <GameRow

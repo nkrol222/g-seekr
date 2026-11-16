@@ -79,6 +79,30 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE users ADD COLUMN filters TEXT;
   `,
+  // 5: what drives recommendations: likes, "not interested", and each user's link to their RomM account
+  `
+  CREATE TABLE likes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    igdb_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, igdb_id)
+  );
+  CREATE TABLE dismissed (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    igdb_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, igdb_id)
+  );
+  -- A RomM client token the user made (read scopes), to read their own play history
+  CREATE TABLE romm_links (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    romm_username TEXT NOT NULL,
+    linked_at TEXT NOT NULL,
+    last_error TEXT
+  );
+  `,
 ];
 
 export function openDb(path: string): Db {
