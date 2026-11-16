@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api, type Me } from '../api';
+import { Alert, Mark } from './shared';
 
 export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   const [username, setUsername] = useState('');
@@ -22,26 +23,30 @@ export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
 
   return (
     <div className="login">
-      <form onSubmit={submit} className="card">
-        <h1>g-seekr</h1>
-        <p className="muted">Sign in with your Jellyfin account to request games.</p>
-        <label>
-          Username
-          <input autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus />
-        </label>
-        <label>
-          Password
-          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </label>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <button type="submit" className="primary" disabled={busy || !username.trim()}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+      <div className="box">
+        <div className="brand">
+          <span className="mark">
+            <Mark />
+          </span>
+          <h1>g-seekr</h1>
+        </div>
+        <form onSubmit={submit}>
+          <h2>Sign in with your Jellyfin account</h2>
+          <p className="hint">The same username and password you watch with.</p>
+          <label className="field">
+            Username
+            <input className="input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus />
+          </label>
+          <label className="field">
+            Password
+            <input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </label>
+          {error && <Alert kind="error">{error}</Alert>}
+          <button type="submit" className="btn primary" disabled={busy || !username.trim()}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
