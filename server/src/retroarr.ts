@@ -29,6 +29,25 @@ export interface RetroArrGame {
   monitored: boolean;
 }
 
+export interface RetroArrProgress {
+  gameId: number;
+  release: string;
+  // 0-100
+  progress: number;
+  state: string;
+  trackedState: string | null;
+  statusMessages: string[];
+}
+
+export interface RetroArrReplaceResult {
+  blocklisted: string | null;
+  autoQueued: boolean;
+  release: string | null;
+  // Why nothing was grabbed
+  skipped: string | null;
+  error: string | null;
+}
+
 export class RetroArrError extends Error {
   constructor(
     message: string,
@@ -152,6 +171,33 @@ export class RetroArrClient {
 
   async setMonitored(id: number, monitored: boolean): Promise<void> {
     await this.call('PUT', `/games/${id}/monitored`, { monitored });
+  }
+
+  // What the download client is doing for these games: the release, how far along, RetroArr's view of it
+  async progress(gameIds: number[]): Promise<RetroArrProgress[]> {
+    if (gameIds.length === 0) return [];
+    const list = await this.call<Array<Record<string, unknown>>>('GET', `/downloadclient/queue/games?ids=${gameIds.join(',')}`);
+    return list.map((d) => ({
+      gameId: Number(d.gameId),
+      release: String(d.release ?? ''),
+      progress: typeof d.progress === 'number' ? Math.max(0, Math.min(100, d.progress)) : 0,
+      state: String(d.state ?? ''),
+      trackedState: typeof d.trackedState === 'string' ? d.trackedState : null,
+      statusMessages: Array.isArray(d.statusMessages) ? d.statusMessages.filter((m): m is string => typeof m === 'string').slice(0, 5) : [],
+    }));
+  }
+
+  // Blocklists the game's release and grabs another that qualifies; its import replaces the old one. Can take a while.
+  async replace(gameId: number, reason: string): Promise<RetroArrReplaceResult> {
+    const r = await this.call<Record<string, unknown>>('POST', `/games/${gameId}/replace`, { reason }, 180_000);
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+    return {
+      blocklisted: text(r.blocklisted),
+      autoQueued: r.autoQueued === true,
+      release: text(r.autoQueuedRelease),
+      skipped: text(r.autoDispatchSkipped),
+      error: text(r.error),
+    };
   }
 
   // Searches the indexers and grabs a release that scores high enough. Can take a while.

@@ -356,3 +356,124 @@ describe('RetroArr webhooks', () => {
     expect(built.store.request(id)).toMatchObject({ status: 'failed', error: 'The game was removed from RetroArr.' });
   });
 });
+
+describe('progress and problem reports', () => {
+  const HOOK_TOKEN = 'h'.repeat(32);
+  const hook = (event: string, data: Record<string, unknown>) =>
+    built.app.inject({ method: 'POST', url: '/api/webhooks/retroarr', headers: { 'x-webhook-token': HOOK_TOKEN }, payload: { event, data } });
+
+  // alice's request for Chrono Trigger (SNES), approved by root and handed to RetroArr as game 100
+  async function aliceRequest() {
+    const alice = await login('alice');
+    const root = await login('root');
+    const created = await built.app.inject({ method: 'POST', url: '/api/requests', headers: alice.headers, payload: { igdbId: 1020, platformId: 41 } });
+    const id = created.json().request.id as number;
+    await built.app.inject({ method: 'POST', url: `/api/requests/${id}/approve`, headers: root.headers, payload: {} });
+    return { alice, root, id };
+  }
+
+  it('shows live download progress for the requests being fetched, and copes with an older RetroArr', async () => {
+    await start({ RETROARR_WEBHOOK_TOKEN: HOOK_TOKEN });
+    const { alice, root } = await aliceRequest();
+    fakes.queue = [
+      { gameId: 100, release: 'Chrono Trigger (USA)', progress: 43.5, state: 'Downloading', trackedState: 'Downloading' },
+      { gameId: 555, release: 'Someone else’s game', progress: 10, state: 'Downloading' },
+    ];
+
+    const mine = await built.app.inject({ url: '/api/progress', headers: alice.headers });
+    expect(mine.json()).toEqual({
+      progress: [{ gameId: 100, release: 'Chrono Trigger (USA)', progress: 43.5, state: 'Downloading', trackedState: 'Downloading', statusMessages: [] }],
+    });
+    expect(fakes.calls.at(-1)).toBe('GET /downloadclient/queue/games?ids=100');
+
+    // bob has nothing in flight, so RetroArr isn't asked
+    const bob = await login('bob');
+    const calls = fakes.calls.length;
+    expect((await built.app.inject({ url: '/api/progress', headers: bob.headers })).json()).toEqual({ progress: [] });
+    expect(fakes.calls.length).toBe(calls);
+
+    fakes.queue = null;
+    expect((await built.app.inject({ url: '/api/progress?scope=all', headers: root.headers })).json()).toEqual({
+      progress: [],
+      error: 'Download progress isn’t available right now.',
+    });
+  });
+
+  it('lets the requester report a problem once the game is ready, and only once', async () => {
+    await start({ RETROARR_WEBHOOK_TOKEN: HOOK_TOKEN });
+    const { alice, id } = await aliceRequest();
+    const report = (headers: Record<string, string>, payload: Record<string, unknown>) =>
+      built.app.inject({ method: 'POST', url: `/api/requests/${id}/issues`, headers, payload });
+
+    expect((await report(alice.headers, { kind: 'wont_launch' })).json().error).toBe('Problems can be reported once a game is ready to play.');
+    await hook('OnDownloadCompleted', { gameId: 100, release: 'Chrono Trigger (USA)' });
+
+    expect((await report(alice.headers, { kind: 'nope' })).statusCode).toBe(400);
+    expect((await report(alice.headers, { kind: 'other' })).json().error).toBe('Say what’s wrong.');
+    const bob = await login('bob');
+    expect((await report(bob.headers, { kind: 'wont_launch' })).statusCode).toBe(404);
+
+    const created = await report(alice.headers, { kind: 'wont_launch', message: 'black screen after the logo' });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().issue).toMatchObject({ status: 'open', kind: 'wont_launch', title: 'Chrono Trigger', username: 'alice', release: 'Chrono Trigger (USA)' });
+    await flush();
+    expect(fakes.discord.at(-1)!.content).toBe('🛠️ alice reported a problem with **Chrono Trigger** for Super Nintendo: Won’t launch – black screen after the logo');
+    expect((await report(alice.headers, { kind: 'wrong_region' })).json().error).toBe('A problem with this game has already been reported.');
+
+    // alice sees hers, bob none, an admin all
+    expect((await built.app.inject({ url: '/api/issues', headers: alice.headers })).json().issues).toHaveLength(1);
+    expect((await built.app.inject({ url: '/api/issues?scope=all', headers: bob.headers })).json().issues).toHaveLength(0);
+  });
+
+  it('replaces a reported release through RetroArr and follows the replacement to its import', async () => {
+    await start({ RETROARR_WEBHOOK_TOKEN: HOOK_TOKEN });
+    const { alice, root, id } = await aliceRequest();
+    await hook('OnDownloadCompleted', { gameId: 100, release: 'Chrono Trigger (USA)' });
+    const issue = (await built.app.inject({ method: 'POST', url: `/api/requests/${id}/issues`, headers: alice.headers, payload: { kind: 'wrong_region', message: 'Japanese text' } })).json().issue;
+
+    expect((await built.app.inject({ method: 'POST', url: `/api/issues/${issue.id}/replace`, headers: alice.headers, payload: {} })).statusCode).toBe(403);
+    const replaced = await built.app.inject({ method: 'POST', url: `/api/issues/${issue.id}/replace`, headers: root.headers, payload: {} });
+    expect(replaced.json().issue).toMatchObject({ status: 'replacing', replacementRelease: 'Chrono Trigger (Europe)' });
+    expect(fakes.replaced).toEqual([{ gameId: 100, reason: 'Wrong region or language: Japanese text (reported by alice in g-seekr)' }]);
+    // The old release stays playable meanwhile
+    expect(built.store.request(id)!.status).toBe('available');
+
+    // The replacement's progress shows while it downloads
+    fakes.queue = [{ gameId: 100, release: 'Chrono Trigger (Europe)', progress: 70, state: 'Downloading' }];
+    expect((await built.app.inject({ url: '/api/progress', headers: alice.headers })).json().progress[0]).toMatchObject({ progress: 70 });
+
+    expect((await hook('OnDownloadFailed', { gameId: 100, reason: 'stalled' })).json()).toEqual({ updated: 1 });
+    expect(built.store.issue(issue.id)).toMatchObject({ status: 'replacing', resolution: 'The replacement’s download failed: stalled. RetroArr is searching again.' });
+    await hook('OnDownloadStarted', { gameId: 100, release: 'Chrono Trigger (Europe) (Rev 1)' });
+    await hook('OnDownloadCompleted', { gameId: 100, release: 'Chrono Trigger (Europe) (Rev 1)' });
+    expect(built.store.issue(issue.id)).toMatchObject({ status: 'resolved', resolution: 'Replaced with Chrono Trigger (Europe) (Rev 1).', resolvedAt: clock.toISOString() });
+    expect(built.store.request(id)).toMatchObject({ status: 'available', release: 'Chrono Trigger (Europe) (Rev 1)' });
+    await flush();
+    expect(fakes.discord.at(-1)!.content).toBe('✅ alice, your report on **Chrono Trigger** for Super Nintendo is resolved: Replaced with Chrono Trigger (Europe) (Rev 1).');
+  });
+
+  it('keeps the report open when nothing could be grabbed, explains RetroArr’s refusals, and resolves by hand', async () => {
+    await start({ RETROARR_WEBHOOK_TOKEN: HOOK_TOKEN });
+    const { alice, root, id } = await aliceRequest();
+    await hook('OnDownloadCompleted', { gameId: 100 });
+    const issue = (await built.app.inject({ method: 'POST', url: `/api/requests/${id}/issues`, headers: alice.headers, payload: { kind: 'missing_files' } })).json().issue;
+    const replace = () => built.app.inject({ method: 'POST', url: `/api/issues/${issue.id}/replace`, headers: root.headers, payload: {} });
+
+    fakes.replaceAnswer = { status: 200, body: { blocklisted: 'Chrono Trigger (USA)', autoQueued: false, autoDispatchSkipped: 'no release qualifies for auto-download, so the game keeps its release for now' } };
+    expect((await replace()).json().issue).toMatchObject({
+      status: 'open',
+      resolution: 'The reported release is blocklisted, but no replacement was grabbed yet: no release qualifies for auto-download, so the game keeps its release for now. Try again later.',
+    });
+
+    fakes.replaceAnswer = { status: 409, body: { message: 'RetroArr doesn’t know which release the game has.' } };
+    const refused = await replace();
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toBe('RetroArr doesn’t know which release the game has.');
+
+    const resolved = await built.app.inject({ method: 'POST', url: `/api/issues/${issue.id}/resolve`, headers: root.headers, payload: { note: 'Added the missing disc by hand.' } });
+    expect(resolved.json().issue).toMatchObject({ status: 'resolved', resolution: 'Added the missing disc by hand.' });
+    expect((await replace()).statusCode).toBe(409);
+    // Resolved, so a new report can be made
+    expect((await built.app.inject({ method: 'POST', url: `/api/requests/${id}/issues`, headers: alice.headers, payload: { kind: 'wont_launch' } })).statusCode).toBe(201);
+  });
+});

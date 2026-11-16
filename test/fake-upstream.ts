@@ -24,6 +24,15 @@ createServer(async (req, res) => {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
   const url = req.url ?? '/';
+  // POST /ra/_queue/{gameId}/{percent}: the download client reports that much of the game's release
+  const q = url.match(/^\/ra\/_queue\/(\d+)\/(\d+)$/);
+  if (q) {
+    const gameId = Number(q[1]);
+    const game = fakes.games.find((g) => g.id === gameId);
+    fakes.queue = [...(fakes.queue ?? []).filter((d) => d.gameId !== gameId), { gameId, release: `${game?.title ?? 'Game'} (USA)`, progress: Number(q[2]), state: 'Downloading', trackedState: 'Downloading' }];
+    res.writeHead(204).end();
+    return;
+  }
   const m = url.match(/^\/ra\/_import\/(\d+)$/);
   if (m) {
     const game = fakes.games.find((g) => g.id === Number(m[1]));

@@ -1,4 +1,4 @@
-import type { GameRequest } from './store.js';
+import type { GameRequest, Issue } from './store.js';
 
 // Discord messages for new requests and for changes the requester cares about.
 // Plain text with mentions switched off, so a game title can't ping @everyone.
@@ -38,6 +38,17 @@ export class Notifier {
   // RetroArr blocklisted the release and searches again; the request stays open
   async downloadFailed(r: GameRequest, reason: string | null): Promise<void> {
     await this.send(`⚠️ The download of ${this.label(r)} failed${reason ? ` (${reason})` : ''}. RetroArr is looking for another release.`);
+  }
+
+  async issueReported(i: Issue, label: string): Promise<void> {
+    await this.send(`🛠️ ${i.username} reported a problem with **${i.title}** for ${i.platformName}: ${label}${i.message ? ` – ${i.message}` : ''}`);
+  }
+
+  async issueChanged(i: Issue): Promise<void> {
+    const game = `**${i.title}** for ${i.platformName}`;
+    if (i.status === 'replacing') return this.send(`🔁 ${i.username}, ${game} is being replaced${i.replacementRelease ? ` with ${i.replacementRelease}` : ''}.`);
+    if (i.status === 'resolved') return this.send(`✅ ${i.username}, your report on ${game} is resolved: ${i.resolution ?? 'resolved'}`);
+    if (i.resolution) return this.send(`⏳ ${game}: ${i.resolution}`);
   }
 
   private async send(content: string): Promise<void> {

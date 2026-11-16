@@ -40,6 +40,36 @@ export interface GameRequest {
   updatedAt: string;
 }
 
+export type IssueKind = 'wont_launch' | 'wrong_game' | 'wrong_region' | 'missing_files' | 'other';
+export const ISSUE_KINDS: IssueKind[] = ['wont_launch', 'wrong_game', 'wrong_region', 'missing_files', 'other'];
+// open: reported; replacing: RetroArr grabbed another release; resolved: replaced or closed by an admin
+export type IssueStatus = 'open' | 'replacing' | 'resolved';
+
+export interface Issue {
+  id: number;
+  requestId: number;
+  userId: number;
+  username: string;
+  kind: IssueKind;
+  message: string | null;
+  status: IssueStatus;
+  // What was done, or why nothing could be yet
+  resolution: string | null;
+  // The release RetroArr grabbed to replace the reported one
+  replacementRelease: string | null;
+  resolvedBy: number | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  // From the request
+  title: string;
+  year: number | null;
+  platformName: string;
+  coverUrl: string | null;
+  retroarrGameId: number | null;
+  release: string | null;
+}
+
 type Row = Record<string, unknown>;
 
 const toUser = (r: Row): User => ({
@@ -75,6 +105,31 @@ const toRequest = (r: Row): GameRequest => ({
   createdAt: String(r.created_at),
   updatedAt: String(r.updated_at),
 });
+
+const toIssue = (r: Row): Issue => ({
+  id: Number(r.id),
+  requestId: Number(r.request_id),
+  userId: Number(r.user_id),
+  username: String(r.username ?? ''),
+  kind: String(r.kind) as IssueKind,
+  message: r.message == null ? null : String(r.message),
+  status: String(r.status) as IssueStatus,
+  resolution: r.resolution == null ? null : String(r.resolution),
+  replacementRelease: r.replacement_release == null ? null : String(r.replacement_release),
+  resolvedBy: r.resolved_by == null ? null : Number(r.resolved_by),
+  resolvedAt: r.resolved_at == null ? null : String(r.resolved_at),
+  createdAt: String(r.created_at),
+  updatedAt: String(r.updated_at),
+  title: String(r.title ?? ''),
+  year: r.year == null ? null : Number(r.year),
+  platformName: String(r.platform_name ?? ''),
+  coverUrl: r.cover_url == null ? null : String(r.cover_url),
+  retroarrGameId: r.retroarr_game_id == null ? null : Number(r.retroarr_game_id),
+  release: r.release == null ? null : String(r.release),
+});
+
+const ISSUE_SELECT = `SELECT i.*, u.username, q.title, q.year, q.platform_name, q.cover_url, q.retroarr_game_id, q.release
+  FROM issues i JOIN users u ON u.id = i.user_id JOIN requests q ON q.id = i.request_id`;
 
 const REQUEST_SELECT = 'SELECT r.*, u.username FROM requests r JOIN users u ON u.id = r.user_id';
 
@@ -245,5 +300,60 @@ export class Store {
 
   deleteRequest(id: number): void {
     this.db.prepare('DELETE FROM requests WHERE id = ?').run(id);
+  }
+
+  // ---- issues ----
+
+  createIssue(i: { requestId: number; userId: number; kind: IssueKind; message: string | null }): Issue {
+    const now = this.ts();
+    const res = this.db
+      .prepare(`INSERT INTO issues (request_id, user_id, kind, message, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'open', ?, ?)`)
+      .run(i.requestId, i.userId, i.kind, i.message, now, now);
+    return this.issue(Number(res.lastInsertRowid))!;
+  }
+
+  issue(id: number): Issue | null {
+    const r = this.db.prepare(`${ISSUE_SELECT} WHERE i.id = ?`).get(id) as Row | undefined;
+    return r ? toIssue(r) : null;
+  }
+
+  unresolvedIssueFor(requestId: number): Issue | null {
+    const r = this.db.prepare(`${ISSUE_SELECT} WHERE i.request_id = ? AND i.status IN ('open', 'replacing')`).get(requestId) as Row | undefined;
+    return r ? toIssue(r) : null;
+  }
+
+  listIssues(filter: { userId?: number; statuses?: IssueStatus[] } = {}): Issue[] {
+    const where: string[] = [];
+    const args: Array<string | number> = [];
+    if (filter.userId !== undefined) {
+      where.push('i.user_id = ?');
+      args.push(filter.userId);
+    }
+    if (filter.statuses?.length) {
+      where.push(`i.status IN (${filter.statuses.map(() => '?').join(',')})`);
+      args.push(...filter.statuses);
+    }
+    const sql = `${ISSUE_SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY CASE i.status WHEN 'open' THEN 0 WHEN 'replacing' THEN 1 ELSE 2 END, i.created_at DESC LIMIT 500`;
+    return (this.db.prepare(sql).all(...args) as Row[]).map(toIssue);
+  }
+
+  updateIssue(id: number, patch: Partial<Pick<Issue, 'status' | 'resolution' | 'replacementRelease' | 'resolvedBy' | 'resolvedAt'>>): Issue | null {
+    const columns: Record<string, string> = {
+      status: 'status',
+      resolution: 'resolution',
+      replacementRelease: 'replacement_release',
+      resolvedBy: 'resolved_by',
+      resolvedAt: 'resolved_at',
+    };
+    const sets: string[] = ['updated_at = ?'];
+    const args: Array<string | number | null> = [this.ts()];
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      sets.push(`${columns[key]} = ?`);
+      args.push(value as string | number | null);
+    }
+    this.db.prepare(`UPDATE issues SET ${sets.join(', ')} WHERE id = ?`).run(...args, id);
+    return this.issue(id);
   }
 }

@@ -11,6 +11,7 @@ import { JellyfinAuthError, type JellyfinClient } from './jellyfin.js';
 import { Notifier } from './notify.js';
 import type { RetroArrClient } from './retroarr.js';
 import { RequestError, RequestService } from './requests.js';
+import { IssueService, isIssueKind } from './issues.js';
 import { Store, type User } from './store.js';
 
 declare module 'fastify' {
@@ -53,6 +54,7 @@ export async function buildApp(deps: AppDeps) {
   const store = new Store(db, deps.now);
   const notifier = new Notifier(config.discordWebhookUrl, log, deps.fetchImpl);
   const requests = new RequestService(config, store, deps.retroarr, notifier, log, deps.now);
+  const issues = new IssueService(store, deps.retroarr, notifier, log, (u) => requests.isAdmin(u), deps.now);
   const limiter = new LoginLimiter();
 
   app.decorate('requestService', requests);
@@ -120,7 +122,7 @@ export async function buildApp(deps: AppDeps) {
     const event = typeof req.body?.event === 'string' ? req.body.event : null;
     const data = req.body?.data && typeof req.body.data === 'object' ? (req.body.data as Record<string, unknown>) : null;
     if (!event || !data) return reply.code(400).send({ error: 'Expected {"event": …, "data": {…}}.' });
-    const updated = requests.handleRetroArrEvent(event, data);
+    const updated = requests.handleRetroArrEvent(event, data) + issues.handleRetroArrEvent(event, data);
     return reply.code(200).send({ updated });
   });
 
@@ -230,6 +232,37 @@ export async function buildApp(deps: AppDeps) {
     return reply.code(204).send();
   });
 
+  // Live progress of what RetroArr is downloading for the user's requests (everyone's for an admin)
+  app.get<{ Querystring: { scope?: string } }>('/api/progress', async (req) => {
+    const all = req.query.scope === 'all' && requests.isAdmin(req.user!);
+    const replacing = issues
+      .list(req.user!, all)
+      .filter((i) => i.status === 'replacing' && i.retroarrGameId !== null)
+      .map((i) => i.retroarrGameId!);
+    return requests.progress(req.user!, all, replacing);
+  });
+
+  // ---- problem reports ----
+
+  app.get<{ Querystring: { scope?: string } }>('/api/issues', async (req) => ({ issues: issues.list(req.user!, req.query.scope === 'all') }));
+
+  app.post<{ Params: { id: string }; Body: { kind?: unknown; message?: unknown } }>('/api/requests/:id/issues', async (req, reply) => {
+    const kind = req.body?.kind;
+    if (!isIssueKind(kind)) return reply.code(400).send({ error: 'Pick what’s wrong.' });
+    const raw = req.body?.message;
+    const message = typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, 1000) : null;
+    if (kind === 'other' && !message) return reply.code(400).send({ error: 'Say what’s wrong.' });
+    return reply.code(201).send({ issue: issues.report(req.user!, idParam(req.params.id), kind, message) });
+  });
+
+  app.post<{ Params: { id: string } }>('/api/issues/:id/replace', { preHandler: requireAdmin }, async (req) => ({
+    issue: await issues.replace(req.user!, idParam(req.params.id)),
+  }));
+
+  app.post<{ Params: { id: string } }>('/api/issues/:id/resolve', { preHandler: requireAdmin }, async (req) => ({
+    issue: issues.resolve(req.user!, idParam(req.params.id), optionalNote(req.body) ?? null),
+  }));
+
   // ---- admin ----
 
   app.get('/api/admin/users', { preHandler: requireAdmin }, async () => ({
@@ -274,7 +307,7 @@ export async function buildApp(deps: AppDeps) {
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found.' }));
   }
 
-  return { app, store, requests };
+  return { app, store, requests, issues };
 }
 
 declare module 'fastify' {

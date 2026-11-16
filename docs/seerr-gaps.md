@@ -10,7 +10,7 @@ status. The first version covers that core loop and little more. This page lists
 - **RSS:** RSS sync (RetroArr gap 2);
 - **IGDB:** an IGDB endpoint RetroArr doesn't expose to the `requests` scope yet.
 
-Status as of 2026-11-14.
+Status as of 2026-11-16.
 
 ## 1. Discovery and recommendations
 
@@ -36,7 +36,7 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 | Admins request on behalf of a user | None | "Request for…" in the admin view | – |
 | Quotas per user and per media type, with global defaults | One limit per user, plus a global default | Separate limits per platform family, if that turns out to be useful | – |
 | Comments on a request, both ways | One admin note on approve or decline | A comment thread per request; notifications on new comments | – |
-| Download progress on the request ("Processing 43%") | Live from RetroArr's webhooks: grabbed (with the release), available, and a failed download with its reason | Progress in percent while downloading | A RetroArr queue endpoint in the `requests` scope |
+| Download progress on the request ("Processing 43%") | Done: grabbed (with the release), a progress bar in percent while it downloads (asked every 10 s), imported, and a failed download with its reason | – | – |
 | Marked available when the library has it, even unrequested | "In the library" from RetroArr's `isOwned` | Also check RomM (what people actually see), so games added by hand show as available | RomM API access |
 | A deep link to the item in Jellyfin | A link to RomM's home page | Link to the game itself in RomM, looked up by IGDB id | RomM API access |
 
@@ -44,7 +44,7 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 
 | Seerr | g-seekr today | To close it | Depends on |
 |---|---|---|---|
-| Users report problems with available media (video, audio, subtitles), and admins resolve them | None | "Report a problem" on an available game: won't launch, wrong game, wrong region, missing discs, needs BIOS. Admins see a queue; "replace" blocklists the release in RetroArr and searches again | A `requests`-scoped RetroArr endpoint for "blocklist this game's release and search again" (the failed-download handling already does this internally) |
+| Users report problems with available media (video, audio, subtitles), and admins resolve them | Done: "Report a problem" on a game that's ready (won't launch, wrong game, wrong region or language, missing files or discs, something else). The Issues page lists them; an admin replaces the release (RetroArr blocklists it and grabs another, which replaces it on import) or resolves with a note. Discord is told | Comments both ways on a report | – |
 
 ## 4. Users and permissions
 
@@ -74,7 +74,7 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 
 ## Suggested order
 
-1. **Live status and issues:** grabbed, available and failed-with-reason are live since A6. Still to do: progress in percent, and "report a problem" with a one-click replace. These close the loop on what users already do.
+1. ~~**Live status and issues.**~~ Done: progress in percent, failure reasons, problem reports with a one-click replace.
 2. **Discovery basics:** a game detail page, then sliders for popular, upcoming, recently added and by platform. This needs the IGDB endpoints in RetroArr, or g-seekr's own IGDB credentials. That choice is open: RetroArr already holds the credentials and the platform mapping, so extending its `requests` scope keeps one source of truth.
 3. **Recommendations:** similar games on the detail page, then "because you requested" and "because you played", the latter from RomM.
 4. **Request options**, once A4 lands: a release preference per request.

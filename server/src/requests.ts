@@ -264,7 +264,7 @@ export class RequestService {
           this.log.info(`request ${request.id}: RetroArr grabbed ${text(data.release) ?? 'a release'}`);
           break;
         case 'OnDownloadCompleted':
-          this.markAvailable(request, gameId);
+          this.markAvailable(request, gameId, text(data.release));
           break;
         case 'OnDownloadFailed': {
           // RetroArr blocklists the release and searches again on its own: the request goes on
@@ -289,10 +289,29 @@ export class RequestService {
     return affected.length;
   }
 
-  private markAvailable(request: GameRequest, gameId: number): GameRequest {
+  // Live download progress for the requests RetroArr is fetching (or replacing), from its download client
+  async progress(user: User, all: boolean, replacingGameIds: number[] = []) {
+    const mine = all && this.isAdmin(user) ? {} : { userId: user.id };
+    const ids = new Set<number>(replacingGameIds);
+    for (const r of this.store.listRequests({ ...mine, statuses: ['searching', 'downloading'] })) {
+      if (r.retroarrGameId !== null) ids.add(r.retroarrGameId);
+    }
+    if (ids.size === 0) return { progress: [] };
+    try {
+      return { progress: await this.retroarr.progress([...ids]) };
+    } catch (err) {
+      // An older RetroArr has no progress endpoint; the page still works without it
+      this.log.warn(`progress: ${(err as Error).message}`);
+      return { progress: [], error: 'Download progress isn’t available right now.' };
+    }
+  }
+
+  // release: what was imported, when the webhook says
+  private markAvailable(request: GameRequest, gameId: number, release: string | null = null): GameRequest {
     const updated = this.store.updateRequest(request.id, {
       status: 'available',
       retroarrGameId: gameId,
+      release: release ?? undefined,
       availableAt: this.now().toISOString(),
       error: null,
     })!;

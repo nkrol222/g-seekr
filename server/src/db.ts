@@ -55,6 +55,26 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE requests ADD COLUMN release TEXT;
   `,
+  // 3: problems reported with a game that's ready to play, and what an admin did about them
+  `
+  CREATE TABLE issues (
+    id INTEGER PRIMARY KEY,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    message TEXT,
+    status TEXT NOT NULL,
+    resolution TEXT,
+    replacement_release TEXT,
+    resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX ix_issues_status ON issues(status, created_at);
+  -- one unresolved report per request
+  CREATE UNIQUE INDEX ux_issues_unresolved ON issues(request_id) WHERE status IN ('open', 'replacing');
+  `,
 ];
 
 export function openDb(path: string): Db {

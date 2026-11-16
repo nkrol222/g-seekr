@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type GameRequest, type Me, type RequestStatus } from '../api';
+import { api, ISSUE_KIND_LABEL, ISSUE_STATUS_LABEL, type GameRequest, type Issue, type Me, type RequestStatus } from '../api';
+import { ProgressBar, ReportDialog, useProgress } from './Live';
 import { ago, Alert, Avatar, Icon, Poster, rommLink, StatusBadge, statusDetail, when } from './shared';
 
 export type Filter = 'all' | 'open' | 'pending' | 'processing' | 'available' | 'failed' | 'declined';
@@ -25,18 +26,36 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [reporting, setReporting] = useState<GameRequest | null>(null);
+  const scope = admin ? 'all' : 'mine';
 
   const load = useCallback(async () => {
     try {
-      setRequests((await api.requests(admin ? 'all' : 'mine')).requests);
+      const [r, i] = await Promise.all([api.requests(scope), api.issues(scope)]);
+      setRequests(r.requests);
+      setIssues(i.issues);
     } catch (err) {
       setError((err as Error).message);
     }
-  }, [admin]);
+  }, [scope]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The report a request has open, if any
+  const unresolved = new Map(issues.filter((i) => i.status !== 'resolved').map((i) => [i.requestId, i]));
+  const inFlight = (requests ?? []).some((r) => r.status === 'searching' || r.status === 'downloading') || issues.some((i) => i.status === 'replacing');
+  const { byGame, error: progressError } = useProgress(scope, inFlight);
+
+  // While something is in flight, statuses change from RetroArr's webhooks: reload every 30 s
+  useEffect(() => {
+    if (!inFlight) return;
+    const timer = window.setInterval(() => !document.hidden && void load(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [inFlight, load]);
 
   const act = async (r: GameRequest, action: 'approve' | 'decline' | 'retry' | 'remove') => {
     const question =
@@ -100,12 +119,16 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
         </div>
       </div>
       {error && <Alert kind="error">{error}</Alert>}
+      {notice && <Alert kind="success">{notice}</Alert>}
+      {progressError && <Alert kind="info">{progressError}</Alert>}
       {requests && shown.length === 0 && <p className="empty">{requests.length === 0 ? 'No requests yet. Find a game with the search above.' : 'No requests match this filter.'}</p>}
       <div className="request-list">
         {shown.map((r) => {
           const play = rommLink(me.rommUrl, r);
           const detail = statusDetail(r);
           const mine = r.userId === me.user.id;
+          const issue = unresolved.get(r.id);
+          const live = r.retroarrGameId !== null && (r.status === 'searching' || r.status === 'downloading' || issue?.status === 'replacing') ? byGame.get(r.retroarrGameId) : undefined;
           return (
             <article key={r.id} className="request-card" aria-label={`${r.title} for ${r.platformName}`}>
               {r.coverUrl && (
@@ -126,7 +149,25 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
                   <dd>
                     <StatusBadge status={r.status} />
                   </dd>
-                  {detail && (
+                  {live && (
+                    <>
+                      <dt>{issue?.status === 'replacing' ? 'Replacement' : 'Progress'}</dt>
+                      <dd className="live">
+                        <ProgressBar p={live} />
+                      </dd>
+                    </>
+                  )}
+                  {issue && (
+                    <>
+                      <dt>Problem</dt>
+                      <dd>
+                        <a className={`badge issue-${issue.status}`} href="#/issues">
+                          {ISSUE_KIND_LABEL[issue.kind]} · {ISSUE_STATUS_LABEL[issue.status]}
+                        </a>
+                      </dd>
+                    </>
+                  )}
+                  {detail && !live && (
                     <>
                       <dt>Release</dt>
                       <dd className="release" title={detail}>
@@ -183,6 +224,11 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
                     <Icon name="play" /> Play in RomM
                   </a>
                 )}
+                {r.status === 'available' && !issue && (mine || admin) && (
+                  <button type="button" className="btn" onClick={() => setReporting(r)}>
+                    <Icon name="flag" /> Report a problem
+                  </button>
+                )}
                 {(admin || (mine && r.status === 'pending')) && (
                   <button type="button" className="btn" disabled={busy === r.id} onClick={() => act(r, 'remove')}>
                     <Icon name="trash" /> {admin && !mine ? 'Remove' : 'Withdraw'}
@@ -193,6 +239,18 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
           );
         })}
       </div>
+      {reporting && (
+        <ReportDialog
+          request={reporting}
+          onClose={() => setReporting(null)}
+          onReported={(issue) => {
+            setReporting(null);
+            setNotice(`Thanks, the problem with ${issue.title} is reported. You’ll see what happens on the Issues page.`);
+            void load();
+            onChanged();
+          }}
+        />
+      )}
     </>
   );
 }
