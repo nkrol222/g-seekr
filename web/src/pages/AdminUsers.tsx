@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type AdminUser, type Me } from '../api';
-import { when } from './shared';
+import { ago, Alert, Avatar, Toggle, when } from './shared';
 
 export function AdminUsers({ me }: { me: Me }) {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
@@ -29,23 +29,21 @@ export function AdminUsers({ me }: { me: Me }) {
   };
 
   return (
-    <section>
-      <h2>Users</h2>
-      <p className="muted small">People appear here after their first sign-in. Jellyfin admins are admins here too unless that’s switched off in the config.</p>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
+    <>
+      <div className="page-title">
+        <h1>Users</h1>
+      </div>
+      <Alert kind="info">People appear here after their first sign-in with Jellyfin. Jellyfin admins are admins here too, unless that’s switched off in the config.</Alert>
+      {error && <Alert kind="error">{error}</Alert>}
       <div className="table-wrap">
-        <table>
+        <table className="table">
           <thead>
             <tr>
               <th>User</th>
               <th>Admin</th>
               <th>Auto-approve</th>
-              <th>Limit</th>
-              <th>Used</th>
+              <th>Request limit</th>
+              <th>Requests used</th>
               <th>Last sign-in</th>
             </tr>
           </thead>
@@ -53,29 +51,27 @@ export function AdminUsers({ me }: { me: Me }) {
             {users?.map((u) => (
               <tr key={u.id}>
                 <td>
-                  {u.username}
-                  {u.jellyfinAdmin && <span className="muted small"> (Jellyfin admin)</span>}
+                  <span className="user">
+                    <Avatar name={u.username} />
+                    <span>
+                      {u.username}
+                      <small>{u.effectiveAdmin ? (u.jellyfinAdmin && !u.isAdmin ? 'Admin via Jellyfin' : 'Admin') : 'User'}</small>
+                    </span>
+                  </span>
+                </td>
+                <td>
+                  <Toggle label={`${u.username} is an admin`} checked={u.isAdmin} disabled={u.id === me.user.id} onChange={(v) => update(u, { isAdmin: v })} />
+                </td>
+                <td>
+                  <Toggle label={`Auto-approve ${u.username}`} checked={u.autoApprove} onChange={(v) => update(u, { autoApprove: v })} />
                 </td>
                 <td>
                   <input
-                    type="checkbox"
-                    aria-label={`${u.username} is an admin`}
-                    checked={u.isAdmin}
-                    disabled={u.id === me.user.id}
-                    onChange={(e) => update(u, { isAdmin: e.target.checked })}
-                  />
-                  {!u.isAdmin && u.effectiveAdmin && <span className="muted small"> via Jellyfin</span>}
-                </td>
-                <td>
-                  <input type="checkbox" aria-label={`Auto-approve ${u.username}`} checked={u.autoApprove} onChange={(e) => update(u, { autoApprove: e.target.checked })} />
-                </td>
-                <td>
-                  <input
-                    className="limit"
+                    className="input"
                     type="number"
                     min={0}
                     max={1000}
-                    placeholder="default"
+                    placeholder="Default"
                     aria-label={`Request limit for ${u.username}`}
                     defaultValue={u.requestLimit ?? ''}
                     onBlur={(e) => {
@@ -85,13 +81,13 @@ export function AdminUsers({ me }: { me: Me }) {
                     }}
                   />
                 </td>
-                <td>{u.limits.limit === 0 ? `${u.limits.used} (no limit)` : `${u.limits.used} / ${u.limits.limit}`}</td>
-                <td>{when(u.lastLoginAt)}</td>
+                <td>{u.limits.limit === 0 ? `${u.limits.used} (no limit)` : `${u.limits.used} of ${u.limits.limit} in ${u.limits.days} days`}</td>
+                <td title={when(u.lastLoginAt)}>{ago(u.lastLoginAt) || 'Never'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </section>
+    </>
   );
 }

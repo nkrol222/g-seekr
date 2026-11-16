@@ -6,6 +6,18 @@ import { createServer } from 'node:http';
 import { Fakes, JELLYFIN, RETROARR } from './fakes.js';
 
 const fakes = new Fakes();
+// More of a catalogue to look at than the unit tests need
+for (const [id, title, year, platforms] of [
+  [1103, 'Super Metroid', 1994, [41]],
+  [1026, 'The Legend of Zelda: A Link to the Past', 1991, [41]],
+  [1068, 'Super Mario World', 1990, [41]],
+  [1074, 'Super Mario 64', 1996, [50]],
+  [1009, 'Final Fantasy VI', 1994, [41, 50]],
+  [1029, 'Castlevania: Symphony of the Night', 1997, [50]],
+  [1121, 'Metal Gear Solid', 1998, [50]],
+  [1079, 'Secret of Mana', 1993, [41]],
+  [1131, 'Chrono Cross', 1999, [50]],
+] as const) fakes.catalogue.set(id, { title, year, platforms: [...platforms] });
 const port = Number(process.env.FAKE_PORT ?? 5099);
 
 createServer(async (req, res) => {
