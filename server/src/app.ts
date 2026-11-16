@@ -9,9 +9,10 @@ import type { Config } from './config.js';
 import type { Db } from './db.js';
 import { JellyfinAuthError, type JellyfinClient } from './jellyfin.js';
 import { Notifier } from './notify.js';
-import type { RetroArrClient } from './retroarr.js';
+import { RetroArrError, type RetroArrClient } from './retroarr.js';
 import { RequestError, RequestService } from './requests.js';
 import { IssueService, isIssueKind } from './issues.js';
+import { DiscoverService } from './discover.js';
 import { Store, type User } from './store.js';
 
 declare module 'fastify' {
@@ -55,6 +56,7 @@ export async function buildApp(deps: AppDeps) {
   const notifier = new Notifier(config.discordWebhookUrl, log, deps.fetchImpl);
   const requests = new RequestService(config, store, deps.retroarr, notifier, log, deps.now);
   const issues = new IssueService(store, deps.retroarr, notifier, log, (u) => requests.isAdmin(u), deps.now);
+  const discover = new DiscoverService(store, deps.retroarr, requests);
   const limiter = new LoginLimiter();
 
   app.decorate('requestService', requests);
@@ -67,7 +69,8 @@ export async function buildApp(deps: AppDeps) {
     reply.header('X-Frame-Options', 'DENY');
     reply.header(
       'Content-Security-Policy',
-      "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      // Trailers play in YouTube's privacy-enhanced player
+      "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
   });
 
@@ -97,6 +100,10 @@ export async function buildApp(deps: AppDeps) {
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof RequestError) {
       return reply.code(err.statusCode).send({ error: err.message, code: err.code, request: err.request });
+    }
+    // RetroArr couldn't ask IGDB (not set up, or not answering): say so plainly
+    if (err instanceof RetroArrError && err.status === 503) {
+      return reply.code(503).send({ error: err.message.replace(/^RetroArr answered 503: /, '') });
     }
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });
@@ -187,6 +194,26 @@ export async function buildApp(deps: AppDeps) {
     if (q.length < 2) return reply.code(400).send({ error: 'Type at least two characters.' });
     if (q.length > 100) return reply.code(400).send({ error: 'That search is too long.' });
     return { results: await requests.search(q) };
+  });
+
+  // ---- discovery (IGDB lists through RetroArr) ----
+
+  app.get('/api/me/filters', async (req) => ({ filters: discover.filtersFor(req.user!) }));
+  app.put<{ Body: { filters?: unknown } }>('/api/me/filters', async (req) => ({ filters: discover.saveFilters(req.user!, req.body?.filters) }));
+
+  app.get('/api/discover/options', async () => discover.options());
+
+  app.get('/api/discover/recent', async () => ({ games: await discover.recentlyAdded() }));
+
+  app.post<{ Body: { list?: unknown; sort?: unknown; query?: unknown; page?: unknown; platformId?: unknown; filters?: unknown } }>(
+    '/api/discover/games',
+    async (req) => discover.games(req.body ?? {}),
+  );
+
+  app.get<{ Params: { igdbId: string } }>('/api/games/:igdbId', async (req, reply) => {
+    const igdbId = Number(req.params.igdbId);
+    if (!Number.isInteger(igdbId) || igdbId <= 0) return reply.code(404).send({ error: 'Game not found.' });
+    return discover.game(igdbId, discover.filtersFor(req.user!).includeAdult);
   });
 
   // ---- requests ----

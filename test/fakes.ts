@@ -46,6 +46,9 @@ export class Fakes {
     body: { blocklisted: 'Chrono Trigger (USA)', autoQueued: true, autoQueuedRelease: 'Chrono Trigger (Europe)', autoDispatchSkipped: null, error: null },
   };
   replaced: Array<{ gameId: number; reason: string }> = [];
+  // The bodies of POST /discover/games, and whether IGDB is "down"
+  discoverBodies: Array<Record<string, unknown>> = [];
+  igdbDown = false;
 
   fetch: typeof fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
@@ -116,6 +119,40 @@ export class Fakes {
         return json({ ok: true });
       }
       if (/^\/games\/\d+\/search-now$/.test(path)) return json({ scored: [] });
+      if (path.startsWith('/discover') && this.igdbDown) return json({ message: 'IGDB didn’t answer; try again in a moment.' }, 503);
+      if (path === '/discover/games' && method === 'POST') {
+        this.discoverBodies.push(body);
+        const term = typeof body.query === 'string' ? body.query.toLowerCase() : '';
+        const games = [...this.catalogue.entries()]
+          .filter(([, g]) => g.platforms.some((p) => (body.platformIds as number[]).includes(p)) && (!term || g.title.toLowerCase().includes(term)))
+          .slice(body.offset, body.offset + body.limit)
+          .map(([igdbId, g]) => this.discoverGame(igdbId, g));
+        return json({ games });
+      }
+      m = path.match(/^\/discover\/games\/(\d+)$/);
+      if (m) {
+        const g = this.catalogue.get(Number(m[1]));
+        if (!g) return json({ message: 'No such game on IGDB.' }, 404);
+        const others = [...this.catalogue.entries()].filter(([id]) => id !== Number(m![1]));
+        return json({
+          game: this.discoverGame(Number(m[1]), g),
+          storyline: 'Long ago…',
+          backgroundUrl: null,
+          screenshots: ['https://images.igdb.test/s1.jpg'],
+          videos: [{ name: 'Trailer', youtubeId: 'abcdefghijk' }, { name: 'Bad', youtubeId: 'x"><script>' }],
+          themes: ['Fantasy'],
+          gameModes: ['Single player'],
+          developers: ['Square'],
+          publishers: ['Square'],
+          franchises: [],
+          releases: g.platforms.map((p) => ({ platform: `Platform ${p}`, platformId: p, date: `${g.year}-03-11` })).concat([{ platform: 'Arcade', platformId: null, date: null } as never]),
+          similar: [...others.map(([id, o]) => this.discoverGame(id, o)), { ...this.discoverGame(9999, { title: 'Elsewhere', year: 2001, platforms: [77] }) }],
+        });
+      }
+      if (path === '/discover/options') return json({ genres: [{ id: 12, name: 'Role-playing (RPG)' }], themes: [{ id: 42, name: 'Erotic' }], gameModes: [{ id: 1, name: 'Single player' }] });
+      if (path === '/discover/library/recent') {
+        return json({ games: this.games.filter((g) => g.status === 4).map((g) => this.discoverGame(g.igdbId, this.catalogue.get(g.igdbId)!)) });
+      }
       if (path === '/downloadclient/queue/games') {
         if (this.queue === null) return json({ error: 'unknown route' }, 404);
         const ids = url.searchParams.get('ids')!.split(',').map(Number);
@@ -130,6 +167,21 @@ export class Fakes {
     }
     throw new Error('unexpected fetch ' + url.href);
   };
+
+  private discoverGame(igdbId: number, g: { title: string; year: number; platforms: number[] }) {
+    return {
+      igdbId,
+      title: g.title,
+      year: g.year,
+      coverUrl: `https://images.igdb.test/${igdbId}.jpg`,
+      summary: 'A game.',
+      rating: 90,
+      ratingCount: 100,
+      genres: ['Role-playing (RPG)'],
+      platformIds: g.platforms,
+      library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status })),
+    };
+  }
 
   private lookupGame(igdbId: number, g: { title: string; year: number; platforms: number[] }) {
     return {

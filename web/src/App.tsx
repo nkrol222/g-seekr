@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, ApiError, type Me } from './api';
 import { Login } from './pages/Login';
 import { Discover } from './pages/Discover';
-import { Search } from './pages/Search';
+import { GameGrid, Search } from './pages/Search';
+import { GamePage } from './pages/Game';
 import { isFilter, Requests } from './pages/Requests';
 import { AdminUsers } from './pages/AdminUsers';
 import { Issues } from './pages/Issues';
 import { Avatar, Icon, Mark, type IconName } from './pages/shared';
 
-type View = 'discover' | 'search' | 'requests' | 'issues' | 'users';
+type View = 'discover' | 'browse' | 'search' | 'game' | 'requests' | 'issues' | 'users';
 
 interface Route {
   view: View;
@@ -18,9 +19,16 @@ interface Route {
 // #/search?q=zelda, #/requests?filter=pending, #/users; anything else is Discover
 const parseHash = (): Route => {
   const [path = '', query = ''] = window.location.hash.replace(/^#\/?/, '').split('?');
-  const view = (['search', 'requests', 'issues', 'users'] as const).find((v) => v === path) ?? 'discover';
+  const params = new URLSearchParams(query);
+  // #/game/1020
+  const game = path.match(/^game\/(\d+)$/);
+  if (game) {
+    params.set('id', game[1]!);
+    return { view: 'game', params };
+  }
+  const view = (['browse', 'search', 'requests', 'issues', 'users'] as const).find((v) => v === path) ?? 'discover';
   // #/mine and #/queue were the old requests pages
-  return { view: path === 'mine' || path === 'queue' ? 'requests' : view, params: new URLSearchParams(query) };
+  return { view: path === 'mine' || path === 'queue' ? 'requests' : view, params };
 };
 
 export function App() {
@@ -63,7 +71,15 @@ export function App() {
   return (
     <Shell me={me} view={view} query={view === 'search' ? (route.params.get('q') ?? '') : ''} pending={pending} openIssues={openIssues} onSignOut={() => setMe(null)}>
       {view === 'discover' && <Discover me={me} />}
-      {view === 'search' && <Search query={route.params.get('q') ?? ''} onRequested={refreshMe} />}
+      {view === 'search' && <Search query={route.params.get('q') ?? ''} />}
+      {view === 'browse' && (
+        <GameGrid
+          key={route.params.toString()}
+          list={(['popular', 'top', 'browse'] as const).find((l) => l === route.params.get('list')) ?? 'browse'}
+          platformId={Number(route.params.get('platform')) || undefined}
+        />
+      )}
+      {view === 'game' && <GamePage igdbId={Number(route.params.get('id'))} onRequested={refreshMe} />}
       {view === 'requests' && <Requests me={me} filter={isFilter(filter) ? filter : admin ? 'open' : 'all'} onChanged={refreshMe} />}
       {view === 'issues' && <Issues me={me} onChanged={refreshMe} />}
       {view === 'users' && <AdminUsers me={me} />}
@@ -109,6 +125,7 @@ function Shell({
 
   const links: { id: View; label: string; icon: IconName; href: string; count?: number }[] = [
     { id: 'discover', label: 'Discover', icon: 'sparkles', href: '#/' },
+    { id: 'browse', label: 'Browse', icon: 'squares', href: '#/browse' },
     { id: 'requests', label: me.user.isAdmin ? 'Requests' : 'My requests', icon: 'clock', href: '#/requests', count: me.user.isAdmin ? pending : 0 },
     { id: 'issues', label: me.user.isAdmin ? 'Issues' : 'My problems', icon: 'flag', href: '#/issues', count: me.user.isAdmin ? openIssues : 0 },
     ...(me.user.isAdmin ? [{ id: 'users' as const, label: 'Users', icon: 'users' as const, href: '#/users' }] : []),

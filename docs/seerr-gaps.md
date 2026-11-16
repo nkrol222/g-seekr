@@ -10,7 +10,7 @@ status. The first version covers that core loop and little more. This page lists
 - **RSS:** RSS sync (RetroArr gap 2);
 - **IGDB:** an IGDB endpoint RetroArr doesn't expose to the `requests` scope yet.
 
-Status as of 2026-11-16.
+Status as of 2026-11-17.
 
 ## 1. Discovery and recommendations
 
@@ -18,9 +18,9 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 
 | Seerr | g-seekr today | To close it | Depends on |
 |---|---|---|---|
-| Discover page with sliders: trending, popular, upcoming, recently added | Search only | Sliders backed by IGDB: popular (IGDB's popularity data), upcoming releases, recently released, "recently added to the library". Admins choose which sliders show | IGDB: RetroArr needs `requests`-scoped endpoints for IGDB lists (popular, upcoming by platform), or g-seekr gets its own IGDB credentials |
-| Browse by genre, studio or network | None | Browse by platform (the one that matters most for ROMs), genre, franchise, developer/publisher, and era (decade) | IGDB |
-| Detail page per title: overview, cast, trailers, ratings, where it's available | A result card with a three-line overview | A game page: cover and screenshots, summary, genres, developer, release dates per platform, IGDB rating, trailer, the platforms you can request it for, and the request history | IGDB (screenshots, videos and ratings are in RetroArr's metadata object already; it needs a detail endpoint) |
+| Discover page with sliders: trending, popular, upcoming, recently added | Done: popular right now (IGDB popularity), top rated, recently added to the library, popular per requestable platform, plus request rows | Upcoming releases (left out for now) | – |
+| Browse by genre, studio or network | Done: a Browse page and filtered search, with platform, genre, year range, rating and rating count, game mode, theme, and an adult-games switch (off by default). Filters are saved per user | Developer or publisher, franchise | – |
+| Detail page per title: overview, cast, trailers, ratings, where it's available | Done: a game page with backdrop, summary and story, request per platform, trailers, screenshots, facts, first release per platform, similar games | – | – |
 | "Recommendations" and "Similar" on each title | None | IGDB's `similar_games` and franchise or collection siblings on the game page | IGDB |
 | Personal recommendations (from your watch history and watchlist) | None | "Because you requested X": similar games to your past requests. "Because you played X": RomM play history (RomM keeps per-user data such as last played; what its API exposes needs checking), matched by IGDB id. Ranked by IGDB rating, filtered to platforms you can request, minus what's already in the library or requested | IGDB; RomM API access (a RomM token for g-seekr) |
 | Watchlist, with auto-request from a Plex/Jellyfin watchlist | None | A "want to play" list per user, with optional auto-request when a game releases. Pairs with upcoming releases | RSS, so a new release is grabbed promptly |
@@ -75,7 +75,7 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 ## Suggested order
 
 1. ~~**Live status and issues.**~~ Done: progress in percent, failure reasons, problem reports with a one-click replace.
-2. **Discovery basics:** a game detail page, then sliders for popular, upcoming, recently added and by platform. This needs the IGDB endpoints in RetroArr, or g-seekr's own IGDB credentials. That choice is open: RetroArr already holds the credentials and the platform mapping, so extending its `requests` scope keeps one source of truth.
+2. ~~**Discovery basics.**~~ Done: Discover rows, Browse with filters, filtered search and a game page, from IGDB through RetroArr (its requests scope).
 3. **Recommendations:** similar games on the detail page, then "because you requested" and "because you played", the latter from RomM.
 4. **Request options**, once A4 lands: a release preference per request.
 5. **Permissions, notifications and settings UI**, as more people use it.

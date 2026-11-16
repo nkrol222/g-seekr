@@ -75,6 +75,10 @@ const MIGRATIONS: string[] = [
   -- one unresolved report per request
   CREATE UNIQUE INDEX ux_issues_unresolved ON issues(request_id) WHERE status IN ('open', 'replacing');
   `,
+  // 4: each user's Discover / Browse / search filters, as JSON
+  `
+  ALTER TABLE users ADD COLUMN filters TEXT;
+  `,
 ];
 
 export function openDb(path: string): Db {

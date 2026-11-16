@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { api, STATUS_LABEL, type Platform, type RequestStatus, type SearchResult } from '../api';
-import { Alert, Icon, Poster, StatusBadge } from './shared';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { STATUS_LABEL, type GameCard, type RequestStatus, type SearchResult } from '../api';
+import { Poster, StatusBadge } from './shared';
 
 // The furthest along of a game's requests, for the badge on its card
 const RANK: RequestStatus[] = ['declined', 'failed', 'pending', 'approved', 'searching', 'downloading', 'available'];
@@ -10,13 +10,18 @@ export function cardStatus(game: SearchResult): RequestStatus | null {
   return game.requests.map((r) => r.status).sort((a, b) => RANK.indexOf(b) - RANK.indexOf(a))[0] ?? null;
 }
 
-// A poster like Seerr's: status badge top right, details and the request button on hover
-export function TitleCard({ game, onOpen }: { game: SearchResult; onOpen: () => void }) {
+// A poster like Seerr's: status badge top right, details on hover, the game's page on click
+export function TitleCard({ game }: { game: SearchResult | GameCard }) {
   const status = cardStatus(game);
+  const rating = 'rating' in game && game.rating != null ? Math.round(game.rating) : null;
   return (
-    <button type="button" className="title-card" onClick={onOpen} aria-label={`${game.title}${game.year ? ` (${game.year})` : ''}${status ? `, ${STATUS_LABEL[status]}` : ''}`}>
+    <a
+      className="title-card"
+      href={`#/game/${game.igdbId}`}
+      aria-label={`${game.title}${game.year ? ` (${game.year})` : ''}${status ? `, ${STATUS_LABEL[status]}` : ''}`}
+    >
       <Poster url={game.coverUrl} title={game.title} />
-      <span className="type">Game</span>
+      {rating !== null && <span className="type">★ {rating}</span>}
       {status && (
         <span className="status">
           <StatusBadge status={status} compact />
@@ -26,112 +31,72 @@ export function TitleCard({ game, onOpen }: { game: SearchResult; onOpen: () => 
         {game.year && <span className="year">{game.year}</span>}
         <h3>{game.title}</h3>
         {game.overview && <p>{game.overview}</p>}
-        <span className="cta">{status === 'available' ? 'View' : status ? 'View request' : 'Request'}</span>
+        <span className="cta">{status === 'available' ? 'In the library' : status ? 'View request' : 'Request'}</span>
       </span>
-    </button>
+    </a>
   );
 }
 
-// Seerr's title view, as a modal: the cover as a blurred backdrop, the poster and title, the overview, and a
-// request button per platform the game is out on
-export function GameModal({
-  game,
-  platforms,
-  onClose,
-  onRequested,
-}: {
-  game: SearchResult;
-  platforms: Map<number, Platform>;
-  onClose: () => void;
-  onRequested: (game: SearchResult, request: { id: number; platformId: number; status: RequestStatus }) => void;
-}) {
-  const [pending, setPending] = useState<number | null>(null);
+// A Discover row: loads when it scrolls into view, so a long page of rows doesn't ask for everything at once
+export function GameRow({ title, load, link, empty = 'Nothing here yet.' }: { title: ReactNode; load: () => Promise<GameCard[]>; link?: string; empty?: string }) {
+  const ref = useRef<HTMLElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [games, setGames] = useState<GameCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
-  }, [onClose]);
-
-  const request = async (platformId: number) => {
-    setPending(platformId);
-    setError(null);
-    setNotice(null);
-    try {
-      const { request } = await api.request(game.igdbId, platformId);
-      setNotice(`Requested for ${request.platformName}: ${STATUS_LABEL[request.status]}.`);
-      onRequested(game, { id: request.id, platformId, status: request.status });
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setPending(null);
+    const el = ref.current;
+    if (!el || visible) return;
+    if (!('IntersectionObserver' in window)) {
+      setVisible(true);
+      return;
     }
-  };
+    const obs = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setVisible(true), { rootMargin: '300px' });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [visible]);
 
-  const status = cardStatus(game);
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    loadRef
+      .current()
+      .then((g) => !cancelled && setGames(g))
+      .catch((err: Error) => !cancelled && setError(err.message));
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
+
   return (
-    <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="game-title">
-        {game.coverUrl && (
-          <div className="backdrop" aria-hidden="true">
-            <img src={game.coverUrl} alt="" referrerPolicy="no-referrer" />
-          </div>
+    <section className="slider" ref={ref}>
+      <div className="slider-head">
+        <h2>{title}</h2>
+        {link && (
+          <a href={link}>
+            View all <span aria-hidden="true">→</span>
+          </a>
         )}
-        <button type="button" className="btn ghost close" onClick={onClose} aria-label="Close">
-          <Icon name="close" />
-        </button>
-        <div className="head">
-          <div className="poster">
-            <Poster url={game.coverUrl} title={game.title} />
-          </div>
-          <div>
-            <div className="badges">
-              {status && <StatusBadge status={status} />}
-              {game.owned && status !== 'available' && <span className="badge available">In the library</span>}
-            </div>
-            <h2 id="game-title">
-              {game.title} {game.year && <span>({game.year})</span>}
-            </h2>
-          </div>
-        </div>
-        <div className="body">
-          {error && <Alert kind="error">{error}</Alert>}
-          {notice && <Alert kind="success">{notice}</Alert>}
-          <h3>Overview</h3>
-          <p>{game.overview || 'No overview available.'}</p>
-          <h3>Request</h3>
-          {game.platformIds.length === 0 ? (
-            <p className="muted">It isn’t out on any platform you can request.</p>
-          ) : (
-            <div className="platform-list">
-              {game.platformIds.map((pid) => {
-                const platform = platforms.get(pid);
-                if (!platform) return null;
-                const open = game.requests.find((r) => r.platformId === pid);
-                return (
-                  <div key={pid} className="platform-row">
-                    <span className="name">{platform.name}</span>
-                    {open ? (
-                      <StatusBadge status={open.status} />
-                    ) : (
-                      <button type="button" className="btn primary sm" onClick={() => request(pid)} disabled={pending !== null}>
-                        <Icon name="download" />
-                        {pending === pid ? 'Requesting…' : 'Request'}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
       </div>
-    </div>
+      {error ? (
+        <p className="muted small">{error}</p>
+      ) : games === null ? (
+        <div className="slider-track" aria-busy="true">
+          {Array.from({ length: 8 }, (_, i) => (
+            <span key={i} className="title-card skeleton" aria-hidden="true" />
+          ))}
+        </div>
+      ) : games.length === 0 ? (
+        <p className="muted small">{empty}</p>
+      ) : (
+        <div className="slider-track">
+          {games.map((g) => (
+            <TitleCard key={g.igdbId} game={g} />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

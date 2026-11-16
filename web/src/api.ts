@@ -24,6 +24,66 @@ export interface SearchResult {
   requests: { id: number; platformId: number; status: RequestStatus }[];
 }
 
+// A game in Discover, Browse and search: the platforms it can be requested for, whether the library has it, its requests
+export interface GameCard extends SearchResult {
+  rating: number | null;
+  ratingCount: number | null;
+  genres: string[];
+}
+
+export interface Filters {
+  platformIds: number[];
+  genreIds: number[];
+  themeIds: number[];
+  gameModeIds: number[];
+  yearFrom: number | null;
+  yearTo: number | null;
+  minRating: number | null;
+  minRatingCount: number | null;
+  includeAdult: boolean;
+}
+
+export const DEFAULT_FILTERS: Filters = {
+  platformIds: [],
+  genreIds: [],
+  themeIds: [],
+  gameModeIds: [],
+  yearFrom: null,
+  yearTo: null,
+  minRating: null,
+  minRatingCount: null,
+  includeAdult: false,
+};
+
+export interface FilterOption {
+  id: number;
+  name: string;
+}
+
+export interface FilterOptions {
+  genres: FilterOption[];
+  themes: FilterOption[];
+  gameModes: FilterOption[];
+}
+
+export type ListKind = 'popular' | 'top' | 'browse';
+export type SortKind = 'popular' | 'rating' | 'newest' | 'name';
+
+export interface GamePage {
+  game: GameCard;
+  storyline: string | null;
+  backgroundUrl: string | null;
+  screenshots: string[];
+  videos: { name: string; youtubeId: string }[];
+  themes: string[];
+  gameModes: string[];
+  developers: string[];
+  publishers: string[];
+  franchises: string[];
+  releases: { platform: string; platformId: number | null; date: string | null; requestable: boolean }[];
+  similar: GameCard[];
+}
+
 export interface GameRequest {
   id: number;
   userId: number;
@@ -149,6 +209,13 @@ export const api = {
     call<{ issue: Issue }>('POST', `/requests/${requestId}/issues`, { kind, message: message.trim() || undefined }),
   replaceIssue: (id: number) => call<{ issue: Issue }>('POST', `/issues/${id}/replace`, {}),
   resolveIssue: (id: number, note?: string) => call<{ issue: Issue }>('POST', `/issues/${id}/resolve`, { note }),
+  filters: () => call<{ filters: Filters }>('GET', '/me/filters'),
+  saveFilters: (filters: Filters) => call<{ filters: Filters }>('PUT', '/me/filters', { filters }),
+  filterOptions: () => call<FilterOptions>('GET', '/discover/options'),
+  discover: (body: { list?: ListKind; sort?: SortKind; query?: string; page?: number; platformId?: number; filters?: Partial<Filters> }) =>
+    call<{ games: GameCard[]; page: number; more: boolean }>('POST', '/discover/games', body),
+  recentlyAdded: () => call<{ games: GameCard[] }>('GET', '/discover/recent'),
+  game: (igdbId: number) => call<GamePage>('GET', `/games/${igdbId}`),
   users: () => call<{ users: AdminUser[] }>('GET', '/admin/users'),
   updateUser: (id: number, patch: Partial<{ isAdmin: boolean; autoApprove: boolean; requestLimit: number | null }>) =>
     call<{ user: AdminUser }>('PATCH', `/admin/users/${id}`, patch),
