@@ -15,6 +15,7 @@ import { IssueService, isIssueKind } from './issues.js';
 import { DiscoverService } from './discover.js';
 import { RecommendService } from './recommend.js';
 import { RommClient, RommError } from './romm.js';
+import { CollectionService } from './collections.js';
 import { Store, type User } from './store.js';
 
 declare module 'fastify' {
@@ -61,6 +62,7 @@ export async function buildApp(deps: AppDeps) {
   const discover = new DiscoverService(store, deps.retroarr, requests);
   const romm = config.rommApiUrl ? new RommClient(config.rommApiUrl, deps.fetchImpl) : null;
   const recommend = new RecommendService(config, store, discover, romm, log, deps.now);
+  const collections = new CollectionService(db, store, deps.retroarr, requests, discover, log, deps.fetchImpl, deps.now);
   const limiter = new LoginLimiter();
 
   app.decorate('requestService', requests);
@@ -269,6 +271,155 @@ export async function buildApp(deps: AppDeps) {
     return recommend.rommStatus(req.user!);
   });
 
+  // ---- collections: IGDB series and curated / imported lists ----
+
+  const collectionId = (raw: string, what: string): number => {
+    const id = Number(raw);
+    if (!Number.isInteger(id) || id <= 0) throw new RequestError(`${what} not found.`, 404, 'not_found');
+    return id;
+  };
+  const isKind = (k: string): k is 'series' | 'lists' => k === 'series' || k === 'lists';
+  // A row that can't load (RetroArr or IGDB down) is left empty rather than failing the whole page
+  const orEmpty = async <T>(what: string, p: Promise<T[]>): Promise<T[]> => {
+    try {
+      return await p;
+    } catch (err) {
+      log.warn(`collections: ${what}: ${(err as Error).message}`);
+      return [];
+    }
+  };
+
+  app.get('/api/collections', async (req) => {
+    const [featured, popular, inProgress, lists] = await Promise.all([
+      orEmpty('featured', collections.featured(req.user!)),
+      orEmpty('popular', collections.popular(req.user!)),
+      orEmpty('in progress', collections.inProgress(req.user!)),
+      orEmpty('lists', collections.allLists()),
+    ]);
+    return { featured, popular, inProgress, lists };
+  });
+
+  app.get<{ Querystring: { query?: string } }>('/api/collections/series', async (req, reply) => {
+    const q = (req.query.query ?? '').trim();
+    if (q.length < 2 || q.length > 100) return reply.code(400).send({ error: 'Type at least two characters.' });
+    return { series: await collections.searchSeries(q) };
+  });
+
+  app.get<{ Params: { kind: string; id: string } }>('/api/collections/:kind/:id', async (req, reply) => {
+    const { kind } = req.params;
+    if (!isKind(kind)) return reply.code(404).send({ error: 'Not found.' });
+    const id = collectionId(req.params.id, 'Collection');
+    return kind === 'series' ? collections.seriesPage(req.user!, id) : collections.listPage(id);
+  });
+
+  app.post<{ Params: { kind: string; id: string }; Body: { platformId?: unknown } }>('/api/collections/:kind/:id/request-missing', async (req, reply) => {
+    const { kind } = req.params;
+    if (!isKind(kind)) return reply.code(404).send({ error: 'Not found.' });
+    const platformId = Number(req.body?.platformId);
+    if (!Number.isInteger(platformId) || platformId <= 0) return reply.code(400).send({ error: 'Pick a platform.' });
+    const result = await collections.requestMissing(req.user!, kind === 'series' ? 'series' : 'list', collectionId(req.params.id, 'Collection'), platformId);
+    recommend.forget(req.user!.id);
+    return result;
+  });
+
+  app.put<{ Params: { id: string }; Body: { featured?: unknown; name?: unknown } }>(
+    '/api/collections/series/:id/featured',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      if (typeof req.body?.featured !== 'boolean' || typeof req.body.name !== 'string') return reply.code(400).send({ error: 'Say whether to feature it.' });
+      collections.lists.setFeaturedSeries(collectionId(req.params.id, 'Series'), req.body.name.trim().slice(0, 200), req.body.featured);
+      return { featured: req.body.featured };
+    },
+  );
+
+  const listText = (v: unknown, max: number): string | null | undefined =>
+    v === null ? null : typeof v === 'string' ? v.trim().slice(0, max) || null : undefined;
+
+  app.post<{ Body: { name?: unknown; description?: unknown } }>('/api/lists', { preHandler: requireAdmin }, async (req, reply) => {
+    const name = listText(req.body?.name, 120);
+    if (!name) return reply.code(400).send({ error: 'Name the list.' });
+    const list = collections.lists.createList({ name, description: listText(req.body?.description, 1000) ?? null, source: null, createdBy: req.user!.id });
+    return reply.code(201).send({ list });
+  });
+
+  app.patch<{ Params: { id: string }; Body: { name?: unknown; description?: unknown; featured?: unknown } }>(
+    '/api/lists/:id',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const id = collectionId(req.params.id, 'List');
+      if (!collections.lists.list(id)) return reply.code(404).send({ error: 'List not found.' });
+      const b = req.body ?? {};
+      const name = listText(b.name, 120);
+      if (name === null) return reply.code(400).send({ error: 'A list needs a name.' });
+      const list = collections.lists.updateList(id, {
+        name,
+        description: listText(b.description, 1000),
+        featured: typeof b.featured === 'boolean' ? b.featured : undefined,
+      });
+      return { list };
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>('/api/lists/:id', { preHandler: requireAdmin }, async (req, reply) => {
+    collections.lists.deleteList(collectionId(req.params.id, 'List'));
+    return reply.code(204).send();
+  });
+
+  app.post<{ Params: { id: string }; Body: { igdbId?: unknown; platformId?: unknown; title?: unknown; year?: unknown; coverUrl?: unknown } }>(
+    '/api/lists/:id/items',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const id = collectionId(req.params.id, 'List');
+      if (!collections.lists.list(id)) return reply.code(404).send({ error: 'List not found.' });
+      const b = req.body ?? {};
+      const igdbId = Number(b.igdbId);
+      const platformId = Number(b.platformId);
+      const title = listText(b.title, 200);
+      if (!Number.isInteger(igdbId) || igdbId <= 0 || !Number.isInteger(platformId) || platformId <= 0 || !title) {
+        return reply.code(400).send({ error: 'Pick a game and a platform.' });
+      }
+      const year = Number(b.year);
+      const coverUrl = typeof b.coverUrl === 'string' && /^https:\/\//.test(b.coverUrl) ? b.coverUrl : null;
+      const added = collections.lists.addItems(id, [{ igdbId, platformId, title, year: Number.isInteger(year) && year > 0 ? year : null, coverUrl }]);
+      return reply.code(added ? 201 : 200).send({ added });
+    },
+  );
+
+  app.delete<{ Params: { id: string; igdbId: string; platformId: string } }>(
+    '/api/lists/:id/items/:igdbId/:platformId',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      collections.lists.removeItem(collectionId(req.params.id, 'List'), Number(req.params.igdbId), Number(req.params.platformId));
+      return reply.code(204).send();
+    },
+  );
+
+  // Imports: a DAT file can be a few MB
+  app.get('/api/imports', { preHandler: requireAdmin }, async () => ({ imports: collections.lists.imports() }));
+
+  app.post<{ Body: Record<string, unknown> }>('/api/imports', { preHandler: requireAdmin, bodyLimit: 16 * 1024 * 1024 }, async (req, reply) =>
+    reply.code(201).send({ import: await collections.startImport(req.user!, req.body ?? {}) }),
+  );
+
+  app.get<{ Params: { id: string } }>('/api/imports/:id', { preHandler: requireAdmin }, async (req) => collections.review(collectionId(req.params.id, 'Import')));
+
+  app.patch<{ Params: { id: string; idx: string }; Body: { choice?: unknown; skip?: unknown } }>(
+    '/api/imports/:id/items/:idx',
+    { preHandler: requireAdmin },
+    async (req) => ({ item: collections.chooseItem(collectionId(req.params.id, 'Import'), Number(req.params.idx), req.body ?? {}) }),
+  );
+
+  app.post<{ Params: { id: string } }>('/api/imports/:id/retry', { preHandler: requireAdmin }, async (req) => ({
+    import: collections.retryImport(collectionId(req.params.id, 'Import')),
+  }));
+
+  app.post<{ Params: { id: string } }>('/api/imports/:id/save', { preHandler: requireAdmin }, async (req) => collections.save(req.user!, collectionId(req.params.id, 'Import')));
+
+  app.delete<{ Params: { id: string } }>('/api/imports/:id', { preHandler: requireAdmin }, async (req, reply) => {
+    collections.discardImport(collectionId(req.params.id, 'Import'));
+    return reply.code(204).send();
+  });
+
   // ---- requests ----
 
   const idParam = (raw: string): number => {
@@ -389,7 +540,7 @@ export async function buildApp(deps: AppDeps) {
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found.' }));
   }
 
-  return { app, store, requests, issues, recommend };
+  return { app, store, requests, issues, recommend, collections };
 }
 
 declare module 'fastify' {

@@ -73,6 +73,21 @@ profile" and "View ROMs") and pastes it under **Account → RomM link**. g-seekr
 token's RomM username is the user's own (usernames match between Jellyfin and RomM), keeps it in
 its database, and never sends it back to the browser.
 
+### Collections
+
+The **Collections** page (and Discover's collection rows) shows IGDB series and lists. On a
+collection the user picks a platform, sees how much of it the library has ("3 of 5 on
+PlayStation"), and **Request missing** makes one request per game that the library doesn't have and
+nobody has requested yet. Each counts against the user's limit and is approved like any other
+request; games not on that platform are greyed out.
+
+Admins make lists by hand or import them (**Collections → Import a list**) from pasted titles, a
+No-Intro or Redump DAT, or an Internet Archive item (g-seekr reads `archive.org/metadata/<id>`, so
+it needs to reach archive.org). Titles are matched on IGDB through RetroArr for one platform, about
+four a second. Confident matches are chosen; the rest wait on a review page, where the admin picks a
+candidate, searches, or skips each one, then saves. A ★ puts a series or list in Discover's
+"Featured collections" row.
+
 ### RetroArr webhook
 
 So requests update the moment RetroArr grabs, imports or fails a download:

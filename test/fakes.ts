@@ -57,6 +57,12 @@ export class Fakes {
   igdbDown = false;
   // IGDB's similar games per game; unset = every other game in the catalogue
   similar = new Map<number, number[]>();
+  // IGDB series (franchises) and their games
+  franchises = new Map<number, { name: string; games: number[] }>([[5, { name: 'Final Fantasy', games: [427, 1020] }]]);
+  // Titles IGDB "finds" for POST /discover/match: title → [igdbId, similarity][]
+  matches = new Map<string, Array<[number, number]>>();
+  // Files of Internet Archive items
+  archiveItems = new Map<string, Array<{ name: string; source?: string }>>();
 
   fetch: typeof fetch = async (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
@@ -80,6 +86,12 @@ export class Fakes {
         return json({ items: this.rommPlays.get(user) ?? [], limit: 100, offset: 0, total: null });
       }
       return json({ detail: 'Not found' }, 404);
+    }
+
+    if (url.origin === 'https://archive.org') {
+      const id = decodeURIComponent(url.pathname.replace('/metadata/', ''));
+      const files = this.archiveItems.get(id);
+      return json(files ? { files } : {});
     }
 
     if (url.origin === JELLYFIN) {
@@ -171,6 +183,40 @@ export class Fakes {
           series: [],
           developer: 'Square',
           fromDeveloper: others.slice(0, 1).map(([id, o]) => this.discoverGame(id, o)),
+        });
+      }
+      m = path.match(/^\/discover\/series\/(\d+)$/);
+      if (m) {
+        const f = this.franchises.get(Number(m[1]));
+        if (!f) return json({ message: 'No such series on IGDB.' }, 404);
+        return json({ id: Number(m[1]), name: f.name, games: f.games.map((id) => this.discoverGame(id, this.catalogue.get(id)!)) });
+      }
+      if (path === '/discover/series') {
+        const q = url.searchParams.get('query')!.toLowerCase();
+        return json({ series: [...this.franchises.entries()].filter(([, f]) => f.name.toLowerCase().includes(q)).map(([id, f]) => ({ id, name: f.name, gameCount: f.games.length })) });
+      }
+      if (path === '/discover/series-of' && method === 'POST') {
+        return json({
+          games: (body.igdbIds as number[]).map((igdbId) => ({
+            igdbId,
+            series: [...this.franchises.entries()].filter(([, f]) => f.games.includes(igdbId)).map(([id, f]) => ({ id, name: f.name })),
+          })),
+        });
+      }
+      if (path === '/discover/library' && method === 'POST') {
+        return json({
+          games: (body.igdbIds as number[]).map((igdbId) => ({
+            igdbId,
+            library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status })),
+          })),
+        });
+      }
+      if (path === '/discover/match' && method === 'POST') {
+        return json({
+          results: (body.titles as string[]).map((title) => ({
+            title,
+            candidates: (this.matches.get(title) ?? []).map(([id, similarity]) => ({ game: this.discoverGame(id, this.catalogue.get(id)!), similarity })),
+          })),
         });
       }
       if (path === '/discover/options') return json({ genres: [{ id: 12, name: 'Role-playing (RPG)' }], themes: [{ id: 42, name: 'Erotic' }], gameModes: [{ id: 1, name: 'Single player' }] });

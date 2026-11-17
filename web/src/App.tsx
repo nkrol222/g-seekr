@@ -8,9 +8,11 @@ import { ForYou, RommLinkDialog } from './pages/ForYou';
 import { isFilter, Requests } from './pages/Requests';
 import { AdminUsers } from './pages/AdminUsers';
 import { Issues } from './pages/Issues';
+import { Collections, CollectionView } from './pages/Collections';
+import { ImportReview, ImportStart } from './pages/Imports';
 import { Avatar, Icon, Mark, type IconName } from './pages/shared';
 
-type View = 'discover' | 'for-you' | 'browse' | 'search' | 'game' | 'requests' | 'issues' | 'users';
+type View = 'discover' | 'for-you' | 'browse' | 'search' | 'game' | 'collections' | 'collection' | 'import' | 'import-review' | 'requests' | 'issues' | 'users';
 
 interface Route {
   view: View;
@@ -27,7 +29,20 @@ const parseHash = (): Route => {
     params.set('id', game[1]!);
     return { view: 'game', params };
   }
-  const view = (['for-you', 'browse', 'search', 'requests', 'issues', 'users'] as const).find((v) => v === path) ?? 'discover';
+  // #/collection/series/5?platform=50, #/collection/list/3
+  const collection = path.match(/^collection\/(series|list)\/(\d+)$/);
+  if (collection) {
+    params.set('kind', collection[1]!);
+    params.set('id', collection[2]!);
+    return { view: 'collection', params };
+  }
+  // #/collections/import, #/collections/import/7
+  const imp = path.match(/^collections\/import(?:\/(\d+))?$/);
+  if (imp) {
+    if (imp[1]) params.set('id', imp[1]);
+    return { view: imp[1] ? 'import-review' : 'import', params };
+  }
+  const view = (['for-you', 'browse', 'search', 'collections', 'requests', 'issues', 'users'] as const).find((v) => v === path) ?? 'discover';
   // #/mine and #/queue were the old requests pages
   return { view: path === 'mine' || path === 'queue' ? 'requests' : view, params };
 };
@@ -66,7 +81,8 @@ export function App() {
   if (!me) return <Login onSignedIn={(m) => (setMe(m), void refreshMe())} />;
 
   const admin = me.user.isAdmin;
-  const view = !admin && route.view === 'users' ? 'discover' : route.view;
+  const view = !admin && (route.view === 'users' || route.view === 'import' || route.view === 'import-review') ? 'discover' : route.view;
+  const num = (k: string) => Number(route.params.get(k)) || null;
   const filter = route.params.get('filter');
 
   return (
@@ -81,6 +97,18 @@ export function App() {
         />
       )}
       {view === 'for-you' && <ForYou />}
+      {view === 'collections' && <Collections me={me} />}
+      {view === 'collection' && (
+        <CollectionView
+          kind={route.params.get('kind') === 'list' ? 'list' : 'series'}
+          id={num('id')!}
+          me={me}
+          platformParam={num('platform')}
+          onRequested={refreshMe}
+        />
+      )}
+      {view === 'import' && <ImportStart key={route.params.toString()} listId={num('list')} platformId={num('platform')} />}
+      {view === 'import-review' && <ImportReview id={num('id')!} />}
       {view === 'game' && <GamePage igdbId={Number(route.params.get('id'))} onRequested={refreshMe} />}
       {view === 'requests' && <Requests me={me} filter={isFilter(filter) ? filter : admin ? 'open' : 'all'} onChanged={refreshMe} />}
       {view === 'issues' && <Issues me={me} onChanged={refreshMe} />}
@@ -126,10 +154,13 @@ function Shell({
     if (text.trim().length >= 2) window.location.hash = `#/search?q=${encodeURIComponent(text.trim())}`;
   };
 
+  // A collection and the import pages sit under Collections in the sidebar
+  const section: View = view === 'collection' || view === 'import' || view === 'import-review' ? 'collections' : view;
   const links: { id: View; label: string; icon: IconName; href: string; count?: number }[] = [
     { id: 'discover', label: 'Discover', icon: 'sparkles', href: '#/' },
     { id: 'for-you', label: 'For you', icon: 'heart', href: '#/for-you' },
     { id: 'browse', label: 'Browse', icon: 'squares', href: '#/browse' },
+    { id: 'collections', label: 'Collections', icon: 'stack', href: '#/collections' },
     { id: 'requests', label: me.user.isAdmin ? 'Requests' : 'My requests', icon: 'clock', href: '#/requests', count: me.user.isAdmin ? pending : 0 },
     { id: 'issues', label: me.user.isAdmin ? 'Issues' : 'My problems', icon: 'flag', href: '#/issues', count: me.user.isAdmin ? openIssues : 0 },
     ...(me.user.isAdmin ? [{ id: 'users' as const, label: 'Users', icon: 'users' as const, href: '#/users' }] : []),
@@ -146,7 +177,7 @@ function Shell({
         </a>
         <nav aria-label="Main">
           {links.map((l) => (
-            <a key={l.id} href={l.href} className={view === l.id ? 'active' : undefined} aria-current={view === l.id ? 'page' : undefined}>
+            <a key={l.id} href={l.href} className={section === l.id ? 'active' : undefined} aria-current={section === l.id ? 'page' : undefined}>
               <Icon name={l.icon} />
               {l.label}
               {l.count ? (

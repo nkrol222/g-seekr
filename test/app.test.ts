@@ -648,3 +648,165 @@ describe('recommendations', () => {
     expect((await built.app.inject({ method: 'PUT', url: '/api/me/romm', headers: a.headers, payload: { token: ROMM_TOKEN } })).json().error).toMatch(/isn’t set up/);
   });
 });
+
+describe('collections', () => {
+  beforeEach(() => {
+    for (const [id, title, year, platforms] of [
+      [1009, 'Final Fantasy VI', 1994, [41, 50]],
+      [9001, 'Final Fantasy IV', 1991, [41]],
+      [9002, 'Final Fantasy V', 1992, [41]],
+      [9003, 'Final Fantasy Tactics', 1997, [50]],
+    ] as const) fakes.catalogue.set(id, { title, year, platforms: [...platforms] });
+    fakes.franchises.set(5, { name: 'Final Fantasy', games: [427, 1009, 9001, 9002, 9003] });
+    // The library has Final Fantasy VII for the PlayStation
+    fakes.games.push({ id: 1, title: 'Final Fantasy VII', igdbId: 427, platformId: 50, status: 4, monitored: true });
+  });
+
+  const get = (url: string, headers: Record<string, string>) => built.app.inject({ url, headers });
+  const missing = (url: string, headers: Record<string, string>, platformId: number) =>
+    built.app.inject({ method: 'POST', url: `${url}/request-missing`, headers, payload: { platformId } });
+
+  it('shows a series per platform with what the library has, and requests what’s missing until the limit', async () => {
+    await start();
+    const a = await login('alice');
+    const page = (await get('/api/collections/series/5', a.headers)).json();
+    expect(page).toMatchObject({ kind: 'series', name: 'Final Fantasy' });
+    expect(page.platforms).toEqual([
+      { id: 50, name: 'PlayStation', total: 3, inLibrary: 1 },
+      { id: 41, name: 'Super Nintendo', total: 3, inLibrary: 0 },
+    ]);
+    expect(page.games.find((g: { igdbId: number }) => g.igdbId === 427)).toMatchObject({ platformIds: [50], inLibrary: [50] });
+
+    // Alice may make 2 requests: the third missing SNES game is left, and says why
+    const r = (await missing('/api/collections/series/5', a.headers, 41)).json();
+    expect(r.requested.map((g: { title: string }) => g.title)).toEqual(['Final Fantasy VI', 'Final Fantasy IV']);
+    expect(r.skipped).toEqual([{ igdbId: 9002, title: 'Final Fantasy V', reason: 'request limit reached' }]);
+    expect(r.limitReached).toBe(true);
+    expect(built.store.listRequests({ userId: 1 }).map((x) => [x.igdbId, x.platformId, x.status]).sort()).toEqual([
+      [1009, 41, 'pending'],
+      [9001, 41, 'pending'],
+    ]);
+
+    // Bob's PlayStation run skips the game the library has
+    const b = await login('bob');
+    const rb = (await missing('/api/collections/series/5', b.headers, 50)).json();
+    expect(rb.requested.map((g: { igdbId: number }) => g.igdbId)).toEqual([1009, 9003]);
+    const again = (await get('/api/collections/series/5', b.headers)).json();
+    expect(again.games.find((g: { igdbId: number }) => g.igdbId === 1009).requests.map((x: { platformId: number }) => x.platformId).sort()).toEqual([41, 50]);
+
+    expect((await missing('/api/collections/series/5', b.headers, 60)).statusCode).toBe(400);
+    expect((await get('/api/collections/series/77', b.headers)).statusCode).toBe(404);
+    expect((await get('/api/collections/series?query=fant', b.headers)).json().series).toEqual([{ id: 5, name: 'Final Fantasy', gameCount: 5 }]);
+  });
+
+  it('lets admins curate lists and feature them, and finds popular and in-progress series', async () => {
+    await start({ REQUEST_LIMIT: '0' });
+    const root = await login('root');
+    const a = await login('alice');
+    expect((await built.app.inject({ method: 'POST', url: '/api/lists', headers: a.headers, payload: { name: 'Mine' } })).statusCode).toBe(403);
+
+    const list = (await built.app.inject({ method: 'POST', url: '/api/lists', headers: root.headers, payload: { name: 'SNES RPGs', description: 'The classics' } })).json().list;
+    const add = (igdbId: number, platformId: number, title: string) =>
+      built.app.inject({ method: 'POST', url: `/api/lists/${list.id}/items`, headers: root.headers, payload: { igdbId, platformId, title, year: 1995, coverUrl: 'javascript:x' } });
+    expect((await add(1020, 41, 'Chrono Trigger')).statusCode).toBe(201);
+    expect((await add(9001, 41, 'Final Fantasy IV')).statusCode).toBe(201);
+    expect((await add(9001, 41, 'Final Fantasy IV')).json()).toEqual({ added: 0 });
+    await built.app.inject({ method: 'PATCH', url: `/api/lists/${list.id}`, headers: root.headers, payload: { featured: true } });
+
+    const page = (await get(`/api/collections/lists/${list.id}`, a.headers)).json();
+    expect(page).toMatchObject({ kind: 'list', name: 'SNES RPGs', description: 'The classics', featured: true, platforms: [{ id: 41, total: 2, inLibrary: 0 }] });
+    expect(page.games[0]).toMatchObject({ igdbId: 1020, coverUrl: null, platformIds: [41] });
+
+    // Alice requests the list's missing games, then two Final Fantasy games for the PlayStation
+    expect((await missing(`/api/collections/lists/${list.id}`, a.headers, 41)).json().requested).toHaveLength(2);
+    await built.app.inject({ method: 'POST', url: '/api/requests', headers: a.headers, payload: { igdbId: 9003, platformId: 50 } });
+
+    const rows = (await get('/api/collections', a.headers)).json();
+    expect(rows.featured).toEqual([{ kind: 'list', id: list.id, name: 'SNES RPGs', covers: [], total: 2, inLibrary: 0 }]);
+    // Final Fantasy: two of its games requested (IV, Tactics), and the library has one of five
+    expect(rows.popular).toMatchObject([{ kind: 'series', id: 5, name: 'Final Fantasy', total: 5, inLibrary: 1 }]);
+    expect(rows.inProgress).toMatchObject([{ kind: 'series', id: 5 }]);
+    expect(rows.lists).toHaveLength(1);
+
+    await built.app.inject({ method: 'PUT', url: '/api/collections/series/5/featured', headers: root.headers, payload: { featured: true, name: 'Final Fantasy' } });
+    expect((await get('/api/collections', a.headers)).json().featured.map((c: { kind: string }) => c.kind)).toEqual(['series', 'list']);
+
+    await built.app.inject({ method: 'DELETE', url: `/api/lists/${list.id}/items/1020/41`, headers: root.headers });
+    expect((await get(`/api/collections/lists/${list.id}`, a.headers)).json().games).toHaveLength(1);
+    await built.app.inject({ method: 'DELETE', url: `/api/lists/${list.id}`, headers: root.headers });
+    expect((await get(`/api/collections/lists/${list.id}`, a.headers)).statusCode).toBe(404);
+  });
+
+  it('imports a list: confident matches are chosen, the rest wait for review, then it saves', async () => {
+    await start();
+    const root = await login('root');
+    fakes.matches.set('Chrono Trigger', [[1020, 0.98]]);
+    fakes.matches.set('Final Fantasy', [[427, 0.7], [1009, 0.68]]);
+    const text = 'Chrono Trigger (USA).bin\n# a comment\n\nFinal Fantasy (Japan)\nNothing Like It\nChrono Trigger (Europe).bin';
+    const start1 = await built.app.inject({ method: 'POST', url: '/api/imports', headers: root.headers, payload: { kind: 'titles', text, platformId: 50, listName: 'PS1 picks' } });
+    expect(start1.statusCode).toBe(201);
+    const id = start1.json().import.id;
+    await built.collections.idle();
+
+    const review = (await get(`/api/imports/${id}`, root.headers)).json();
+    expect(review.import).toMatchObject({ status: 'review', total: 3, done: 3 });
+    expect(review.items.map((i: { title: string; state: string }) => [i.title, i.state])).toEqual([
+      ['Chrono Trigger', 'matched'],
+      ['Final Fantasy', 'uncertain'],
+      ['Nothing Like It', 'unmatched'],
+    ]);
+    expect(review.items[1].choice).toBeNull();
+
+    const choose = (idx: number, payload: Record<string, unknown>) => built.app.inject({ method: 'PATCH', url: `/api/imports/${id}/items/${idx}`, headers: root.headers, payload });
+    expect((await choose(1, { choice: review.items[1].candidates[1] })).json().item.choice).toMatchObject({ igdbId: 1009, title: 'Final Fantasy VI' });
+    await choose(2, { skip: true });
+
+    const saved = (await built.app.inject({ method: 'POST', url: `/api/imports/${id}/save`, headers: root.headers })).json();
+    expect(saved).toMatchObject({ added: 2, list: { name: 'PS1 picks', source: 'Pasted titles', itemCount: 2 } });
+    expect(built.collections.lists.items(saved.list.id).map((i) => [i.igdbId, i.platformId])).toEqual([
+      [1020, 50],
+      [1009, 50],
+    ]);
+    expect((await built.app.inject({ method: 'POST', url: `/api/imports/${id}/save`, headers: root.headers })).statusCode).toBe(409);
+
+    // A DAT added to the same list
+    const dat = '<?xml version="1.0"?><datafile><game name="Final Fantasy Tactics (USA)"/><game name="[BIOS] PS (USA)"/></datafile>';
+    fakes.matches.set('Final Fantasy Tactics', [[9003, 1]]);
+    const d = (await built.app.inject({ method: 'POST', url: '/api/imports', headers: root.headers, payload: { kind: 'dat', text: dat, platformId: 50, listId: saved.list.id } })).json().import;
+    await built.collections.idle();
+    expect((await built.app.inject({ method: 'POST', url: `/api/imports/${d.id}/save`, headers: root.headers })).json()).toMatchObject({ added: 1, list: { id: saved.list.id, itemCount: 3 } });
+  });
+
+  it('reads Internet Archive items, retries an import IGDB interrupted, and keeps it to admins', async () => {
+    await start();
+    const root = await login('root');
+    const a = await login('alice');
+    expect((await built.app.inject({ method: 'POST', url: '/api/imports', headers: a.headers, payload: {} })).statusCode).toBe(403);
+
+    fakes.archiveItems.set('psx-rpgs', [
+      { name: 'Final Fantasy Tactics (USA).chd' },
+      { name: 'psx-rpgs_meta.xml', source: 'metadata' },
+      { name: '__ia_thumb.jpg' },
+    ]);
+    fakes.matches.set('Final Fantasy Tactics', [[9003, 1]]);
+    fakes.igdbDown = true;
+    const post = (payload: Record<string, unknown>) => built.app.inject({ method: 'POST', url: '/api/imports', headers: root.headers, payload });
+    const job = (await post({ kind: 'archive', item: 'https://archive.org/details/psx-rpgs', platformId: 50, listName: 'From IA' })).json().import;
+    expect(job).toMatchObject({ source: 'archive.org/details/psx-rpgs', total: 1 });
+    await built.collections.idle();
+    expect((await get(`/api/imports/${job.id}`, root.headers)).json().import).toMatchObject({ status: 'failed', error: expect.stringMatching(/IGDB/) });
+
+    fakes.igdbDown = false;
+    await built.app.inject({ method: 'POST', url: `/api/imports/${job.id}/retry`, headers: root.headers });
+    await built.collections.idle();
+    expect((await get(`/api/imports/${job.id}`, root.headers)).json().items[0]).toMatchObject({ state: 'matched', choice: { igdbId: 9003 } });
+
+    expect((await post({ kind: 'archive', item: 'no-such-item', platformId: 50, listName: 'x' })).statusCode).toBe(404);
+    expect((await post({ kind: 'titles', text: 'x', platformId: 60, listName: 'x' })).json().error).toMatch(/platform/);
+    expect((await post({ kind: 'titles', text: 'Chrono Trigger', platformId: 50 })).json().error).toBe('Name the new list.');
+    expect((await post({ kind: 'dat', text: '<datafile/>', platformId: 50, listName: 'x' })).json().error).toMatch(/No games found/);
+
+    await built.app.inject({ method: 'DELETE', url: `/api/imports/${job.id}`, headers: root.headers });
+    expect((await get('/api/imports', root.headers)).json().imports).toHaveLength(0);
+  });
+});

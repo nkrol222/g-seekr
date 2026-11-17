@@ -10,7 +10,7 @@ const config = loadConfig();
 const db = openDb(join(config.dataDir, 'g-seekr.db'));
 const here = dirname(fileURLToPath(import.meta.url));
 
-const { app, requests } = await buildApp({
+const { app, requests, collections } = await buildApp({
   config,
   db,
   jellyfin: new JellyfinClient(config.jellyfinUrl),
@@ -33,6 +33,8 @@ const timer = setInterval(() => void poll(), config.pollSeconds * 1000);
 
 // Say early whether the token works, without refusing to start: RetroArr may just be down
 app.ready().then(async () => {
+  // Imports that were still matching when g-seekr stopped carry on
+  collections.resume();
   if (process.env.ALLOWED_PLATFORMS?.trim()) {
     app.log.warn('ALLOWED_PLATFORMS is ignored: people can request the platforms enabled in RetroArr (Settings → Platforms). Remove it from the env file.');
   }

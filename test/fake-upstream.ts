@@ -18,6 +18,15 @@ for (const [id, title, year, platforms] of [
   [1079, 'Secret of Mana', 1993, [41]],
   [1131, 'Chrono Cross', 1999, [50]],
 ] as const) fakes.catalogue.set(id, { title, year, platforms: [...platforms] });
+// Series for the collection pages, and what the import matcher "finds"
+fakes.franchises.set(5, { name: 'Final Fantasy', games: [427, 1009] });
+fakes.franchises.set(6, { name: 'Chrono', games: [1020, 1131] });
+fakes.franchises.set(7, { name: 'Super Mario', games: [1068, 1074] });
+fakes.franchises.set(9, { name: 'Mana', games: [1079] });
+fakes.matches.set('Super Metroid', [[1103, 1]]);
+fakes.matches.set('Secret of Mana', [[1079, 0.97]]);
+fakes.matches.set('Zelda', [[1026, 0.62]]);
+fakes.matches.set('Mario', [[1068, 0.55], [1074, 0.52]]);
 const port = Number(process.env.FAKE_PORT ?? 5099);
 
 createServer(async (req, res) => {
