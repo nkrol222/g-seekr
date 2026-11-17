@@ -45,6 +45,9 @@ export interface DiscoverCard {
   ratingCount: number | null;
   genres: string[];
   owned: boolean;
+  // The platforms the library has it on, and where it can be played: the game in RomM per platform
+  inLibrary: number[];
+  romm: { platformId: number; rommId: number }[];
   platformIds: number[];
   requests: { id: number; platformId: number; status: RequestStatus }[];
 }
@@ -128,6 +131,25 @@ export class DiscoverService {
     return { games: await this.cards(games), page, more: games.length === PAGE };
   }
 
+  // For the warm-up task: asks for Discover's rows (popular and top rated, then popular per platform) so RetroArr has
+  // them from IGDB before anyone opens the page. One at a time, so IGDB's rate limit is kept. Returns how many loaded.
+  async warm(): Promise<{ loaded: number; failed: number }> {
+    const asks: Array<{ list: ListKind; platformId?: number }> = [{ list: 'popular' }, { list: 'top' }];
+    for (const p of await this.requests.platforms()) asks.push({ list: 'popular', platformId: p.id });
+    let loaded = 0;
+    let failed = 0;
+    for (const a of asks) {
+      try {
+        await this.games({ ...a, filters: { includeAdult: false } });
+        loaded++;
+      } catch {
+        failed++;
+      }
+    }
+    await this.recentlyAdded().catch(() => failed++);
+    return { loaded, failed };
+  }
+
   async recentlyAdded(): Promise<DiscoverCard[]> {
     return this.cards(await this.retroarr.recentlyAdded(20));
   }
@@ -170,6 +192,8 @@ export class DiscoverService {
       ratingCount: g.ratingCount,
       genres: g.genres,
       owned: g.library.some((l) => l.status === 'Downloaded'),
+      inLibrary: g.library.filter((l) => l.status === 'Downloaded').map((l) => l.platformId),
+      romm: g.library.filter((l) => l.rommId !== null).map((l) => ({ platformId: l.platformId, rommId: l.rommId! })),
       platformIds: g.platformIds.filter((id) => requestable.has(id)),
       requests: open.filter((r) => r.igdbId === g.igdbId).map((r) => ({ id: r.id, platformId: r.platformId, status: r.status })),
     }));

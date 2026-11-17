@@ -36,6 +36,8 @@ export interface GameRequest {
   decidedBy: number | null;
   decidedAt: string | null;
   availableAt: string | null;
+  // The game in RomM, once RetroArr's RomM sync has seen it there
+  rommId: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -102,6 +104,7 @@ const toRequest = (r: Row): GameRequest => ({
   decidedBy: r.decided_by == null ? null : Number(r.decided_by),
   decidedAt: r.decided_at == null ? null : String(r.decided_at),
   availableAt: r.available_at == null ? null : String(r.available_at),
+  rommId: r.romm_id == null ? null : Number(r.romm_id),
   createdAt: String(r.created_at),
   updatedAt: String(r.updated_at),
 });
@@ -338,7 +341,7 @@ export class Store {
 
   updateRequest(
     id: number,
-    patch: Partial<Pick<GameRequest, 'status' | 'retroarrGameId' | 'release' | 'note' | 'error' | 'decidedBy' | 'decidedAt' | 'availableAt'>>,
+    patch: Partial<Pick<GameRequest, 'status' | 'retroarrGameId' | 'release' | 'note' | 'error' | 'decidedBy' | 'decidedAt' | 'availableAt' | 'rommId'>>,
   ): GameRequest | null {
     const columns: Record<string, string> = {
       status: 'status',
@@ -349,6 +352,7 @@ export class Store {
       decidedBy: 'decided_by',
       decidedAt: 'decided_at',
       availableAt: 'available_at',
+      rommId: 'romm_id',
     };
     const sets: string[] = ['updated_at = ?'];
     const args: Array<string | number | null> = [this.ts()];

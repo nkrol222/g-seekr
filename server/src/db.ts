@@ -157,6 +157,22 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (import_id, idx)
   );
   `,
+  // 7: the timed jobs' history and intervals (Tasks page)
+  `
+  CREATE TABLE tasks (
+    key TEXT PRIMARY KEY,
+    interval_seconds INTEGER,
+    last_started TEXT,
+    last_finished TEXT,
+    last_duration_ms INTEGER,
+    last_outcome TEXT,
+    last_message TEXT
+  );
+  `,
+  // 8: the game in RomM, once RetroArr's RomM sync has seen it there ("Play in RomM" opens it)
+  `
+  ALTER TABLE requests ADD COLUMN romm_id INTEGER;
+  `,
 ];
 
 export function openDb(path: string): Db {

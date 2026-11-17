@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api, STATUS_LABEL, type GamePage as Page, type Platform, type RequestStatus } from '../api';
-import { Alert, Icon, Poster, StatusBadge } from './shared';
+import { Alert, Icon, Poster, rommGameUrl, StatusBadge } from './shared';
 import { cardStatus, TitleCard } from './Titles';
 
 // Seerr's title page: a backdrop, the poster and facts, the request per platform, then media and similar games
-export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested: () => void }) {
+export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rommUrl: string | null; onRequested: () => void }) {
   const [page, setPage] = useState<Page | null>(null);
   const [platforms, setPlatforms] = useState<Map<number, Platform>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -159,10 +159,20 @@ export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested:
                   const platform = platforms.get(pid);
                   if (!platform) return null;
                   const s = statusFor(pid);
+                  const play = rommGameUrl(rommUrl, g.romm?.find((x) => x.platformId === pid)?.rommId);
+                  const owned = g.inLibrary?.includes(pid) ?? false;
                   return (
                     <div key={pid} className="platform-row">
                       <span className="name">{platform.name}</span>
-                      {s ? (
+                      {play ? (
+                        <a className="btn primary sm" href={play} target="_blank" rel="noreferrer">
+                          <Icon name="play" /> Play in RomM
+                        </a>
+                      ) : owned ? (
+                        <span className="badge available" title="RomM shows it after its next scan, usually within the hour">
+                          In the library
+                        </span>
+                      ) : s ? (
                         <StatusBadge status={s} />
                       ) : (
                         <button type="button" className="btn primary sm" onClick={() => request(pid)} disabled={pending !== null}>

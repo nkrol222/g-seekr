@@ -129,10 +129,13 @@ export function ago(iso: string | null): string {
   return `${n} ${unit[1]}${n === 1 ? '' : 's'} ago`;
 }
 
-// RomM's home page; a link to the game itself needs RomM's id for it, which g-seekr doesn't have yet
+// The game's page in RomM, once RomM has it
+export function rommGameUrl(rommUrl: string | null, rommId: number | null | undefined): string | null {
+  return rommUrl && rommId ? `${rommUrl.replace(/\/+$/, '')}/rom/${rommId}` : null;
+}
+
 export function rommLink(rommUrl: string | null, request: GameRequest): string | null {
-  if (!rommUrl || request.status !== 'available') return null;
-  return rommUrl;
+  return request.status === 'available' ? rommGameUrl(rommUrl, request.rommId) : null;
 }
 
 // A request card's status line: what RetroArr is doing about it

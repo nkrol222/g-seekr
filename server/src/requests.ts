@@ -31,6 +31,8 @@ export interface Logger {
 
 // A platform switched on or off in RetroArr shows here within two minutes
 const PLATFORM_CACHE_MS = 2 * 60_000;
+// A ready request still not in RomM after this long is left alone (RomM can't read it, or RetroArr has no RomM sync)
+const ROMM_LINK_DAYS = 14;
 
 // The request lifecycle:
 //   pending ──approve──▶ approved ──handed to RetroArr──▶ searching ──▶ downloading ──▶ available
@@ -221,9 +223,12 @@ export class RequestService {
     }
   }
 
-  // One pass of the poller: follow every request RetroArr is working on
-  async poll(): Promise<void> {
-    for (const request of this.store.listRequests({ statuses: TRACKED_STATUSES })) {
+  // One pass of the poller: follow every request RetroArr is working on. Returns a summary for the Tasks page.
+  async poll(): Promise<string> {
+    const tracked = this.store.listRequests({ statuses: TRACKED_STATUSES });
+    let changed = 0;
+    let errors = 0;
+    for (const request of tracked) {
       try {
         if (request.retroarrGameId === null) {
           // Approved but the hand-off never finished (the app restarted halfway)
@@ -240,13 +245,44 @@ export class RequestService {
         // RetroArr's game status says nothing of a grab: a request a webhook marked downloading stays so
         // until the import or failure webhook (or the import itself) moves it on
         const grabbed = request.status === 'downloading' && request.release !== null && next === 'searching';
-        if (next === 'available') this.markAvailable(request, game.id);
-        else if (next !== request.status && !grabbed) this.store.updateRequest(request.id, { status: next });
+        if (next === 'available') {
+          this.markAvailable(request, game.id);
+          changed++;
+        } else if (next !== request.status && !grabbed) {
+          this.store.updateRequest(request.id, { status: next });
+          changed++;
+        }
       } catch (err) {
         // RetroArr down: leave the request as it is and try again next time
+        errors++;
         this.log.warn(`poll: request ${request.id}: ${(err as Error).message}`);
       }
     }
+    if (errors > 0 && errors === tracked.length) throw new Error(`RetroArr couldn’t be asked about any of the ${tracked.length} open requests.`);
+    return `${tracked.length} open request(s) checked, ${changed} changed` + (errors ? `, ${errors} couldn’t be checked` : '');
+  }
+
+  // Requests that are ready but not yet linked to the game in RomM (RomM scans new imports within the hour, then
+  // RetroArr's RomM sync links them): asks RetroArr which have a RomM id now. Returns how many got one.
+  async linkRomm(): Promise<number> {
+    const since = this.now().getTime() - ROMM_LINK_DAYS * 86_400_000;
+    const waiting = this.store
+      .listRequests({ statuses: ['available'] })
+      .filter((r) => r.rommId === null && r.retroarrGameId !== null && (!r.availableAt || new Date(r.availableAt).getTime() >= since));
+    if (waiting.length === 0) return 0;
+    const library = await this.retroarr.libraryOf([...new Set(waiting.map((r) => r.igdbId))]);
+    let linked = 0;
+    for (const r of waiting) {
+      const entry = (library.get(r.igdbId) ?? []).find((l) => l.gameId === r.retroarrGameId && l.rommId !== null);
+      if (!entry) continue;
+      this.store.updateRequest(r.id, { rommId: entry.rommId });
+      linked++;
+    }
+    return linked;
+  }
+
+  waitingForRomm(): number {
+    return this.store.listRequests({ statuses: ['available'] }).filter((r) => r.rommId === null && r.retroarrGameId !== null).length;
   }
 
   // RetroArr's webhooks, for every request it is working on for that game. The poller stays as the backstop for a

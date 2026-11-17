@@ -64,7 +64,8 @@ export interface RetroArrDiscoverGame {
   genres: string[];
   platformIds: number[];
   // What RetroArr's library has of it, per platform
-  library: { gameId: number; platformId: number; status: RetroArrGameStatus }[];
+  // rommId: the game in RomM, once RetroArr's RomM sync has seen it there
+  library: { gameId: number; platformId: number; status: RetroArrGameStatus; rommId: number | null }[];
 }
 
 export interface RetroArrDiscoverDetail {
@@ -102,7 +103,7 @@ function toDiscoverGame(g: Record<string, unknown>): RetroArrDiscoverGame {
     platformIds: nums(g.platformIds),
     library: (Array.isArray(g.library) ? g.library : []).map((l) => {
       const o = l as Record<string, unknown>;
-      return { gameId: Number(o.gameId), platformId: Number(o.platformId), status: gameStatus(o.status) };
+      return { gameId: Number(o.gameId), platformId: Number(o.platformId), status: gameStatus(o.status), rommId: o.rommId == null ? null : Number(o.rommId) };
     }),
   };
 }
@@ -347,7 +348,7 @@ export class RetroArrClient {
           Number(g.igdbId),
           (g.library ?? []).map((l) => {
             const o = l as Record<string, unknown>;
-            return { gameId: Number(o.gameId), platformId: Number(o.platformId), status: gameStatus(o.status) };
+            return { gameId: Number(o.gameId), platformId: Number(o.platformId), status: gameStatus(o.status), rommId: o.rommId == null ? null : Number(o.rommId) };
           }),
         );
       }

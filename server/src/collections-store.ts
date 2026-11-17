@@ -233,6 +233,11 @@ export class CollectionStore {
     this.db.prepare(`UPDATE imports SET ${sets.join(', ')} WHERE id = ?`).run(...args, id);
   }
 
+  // Saved imports older than the date: their games are in their list already. Returns how many went.
+  pruneSavedImports(before: Date): number {
+    return Number(this.db.prepare("DELETE FROM imports WHERE status = 'saved' AND updated_at < ?").run(before.toISOString()).changes);
+  }
+
   deleteImport(id: number): void {
     this.db.prepare('DELETE FROM imports WHERE id = ?').run(id);
   }

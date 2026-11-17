@@ -167,6 +167,12 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
                       </dd>
                     </>
                   )}
+                  {r.status === 'available' && !r.rommId && (
+                    <>
+                      <dt>RomM</dt>
+                      <dd className="muted">Being added to RomM, usually within the hour. Play in RomM appears here then.</dd>
+                    </>
+                  )}
                   {detail && !live && (
                     <>
                       <dt>Release</dt>
