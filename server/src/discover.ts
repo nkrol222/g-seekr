@@ -45,6 +45,9 @@ export interface DiscoverCard {
   ratingCount: number | null;
   genres: string[];
   owned: boolean;
+  // The platforms the library has it on, and where it can be played: the game in RomM per platform
+  inLibrary: number[];
+  romm: { platformId: number; rommId: number }[];
   platformIds: number[];
   requests: { id: number; platformId: number; status: RequestStatus }[];
 }
@@ -189,6 +192,8 @@ export class DiscoverService {
       ratingCount: g.ratingCount,
       genres: g.genres,
       owned: g.library.some((l) => l.status === 'Downloaded'),
+      inLibrary: g.library.filter((l) => l.status === 'Downloaded').map((l) => l.platformId),
+      romm: g.library.filter((l) => l.rommId !== null).map((l) => ({ platformId: l.platformId, rommId: l.rommId! })),
       platformIds: g.platformIds.filter((id) => requestable.has(id)),
       requests: open.filter((r) => r.igdbId === g.igdbId).map((r) => ({ id: r.id, platformId: r.platformId, status: r.status })),
     }));

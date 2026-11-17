@@ -73,15 +73,18 @@ export async function buildApp(deps: AppDeps) {
       {
         key: 'request-sync',
         name: 'Follow requests',
-        description: 'Asks RetroArr about every request it’s working on, in case a webhook was missed. With RetroArr’s webhook set up, this is only the backstop.',
+        description: 'Asks RetroArr about every request it’s working on, in case a webhook was missed, and links ready ones to the game in RomM once RomM has it (for “Play in RomM”).',
         defaultSeconds: config.pollSeconds,
         minSeconds: 30,
         maxSeconds: 3600,
         canTurnOff: false,
         firstRunMs: 30_000,
         run: async () => {
-          if (store.listRequests({ statuses: ['approved', 'searching', 'downloading'] }).length === 0) throw new TaskSkipped('No open requests');
-          return requests.poll();
+          const open = store.listRequests({ statuses: ['approved', 'searching', 'downloading'] }).length;
+          if (open === 0 && requests.waitingForRomm() === 0) throw new TaskSkipped('No open requests');
+          const polled = open > 0 ? await requests.poll() : 'No open requests';
+          const linked = await requests.linkRomm();
+          return linked > 0 ? `${polled}; ${linked} linked to RomM` : polled;
         },
       },
       {

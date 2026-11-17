@@ -860,3 +860,36 @@ describe('tasks', () => {
     expect((await put('nope', 120)).statusCode).toBe(404);
   });
 });
+
+describe('RomM links', () => {
+  it('links a ready request to the game in RomM once RetroArr’s RomM sync has seen it, and shows where to play', async () => {
+    await start();
+    const root = await login('root');
+    const created = (await built.app.inject({ method: 'POST', url: '/api/requests', headers: root.headers, payload: { igdbId: 1020, platformId: 41 } })).json().request;
+    await flush();
+    const game = fakes.games.find((g) => g.igdbId === 1020)!;
+    game.status = 4;
+    const run = async () => {
+      await built.app.inject({ method: 'POST', url: '/api/admin/tasks/request-sync/run', headers: root.headers });
+      await built.tasks.idle();
+    };
+
+    // Imported, but RomM hasn't scanned it yet
+    await run();
+    expect(built.store.request(created.id)).toMatchObject({ status: 'available', rommId: null });
+    let page = (await built.app.inject({ url: '/api/games/1020', headers: root.headers })).json();
+    expect(page.game).toMatchObject({ inLibrary: [41], romm: [] });
+
+    // RomM has it now
+    fakes.rommIds.set(game.id, 555);
+    await run();
+    expect(built.store.request(created.id)!.rommId).toBe(555);
+    expect(built.tasks.status('request-sync')!.lastMessage).toMatch(/1 linked to RomM/);
+    page = (await built.app.inject({ url: '/api/games/1020', headers: root.headers })).json();
+    expect(page.game.romm).toEqual([{ platformId: 41, rommId: 555 }]);
+
+    // Nothing left to follow or link: skipped
+    await run();
+    expect(built.tasks.status('request-sync')).toMatchObject({ lastOutcome: 'skipped' });
+  });
+});

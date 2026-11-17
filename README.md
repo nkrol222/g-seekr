@@ -43,7 +43,7 @@ everything at once:
 
 | Task | Default | What it does |
 |---|---|---|
-| Follow requests | `POLL_SECONDS` (5 min) | The backstop for missed webhooks. |
+| Follow requests | `POLL_SECONDS` (5 min) | The backstop for missed webhooks, and links ready requests to the game in RomM. |
 | Warm up Discover | 5 h | Loads Discover's rows and the popular collections ahead of time, so the page opens fast. RetroArr keeps IGDB answers for 6 h. |
 | Housekeeping | 24 h | Deletes expired sign-ins, and list imports saved more than 30 days ago. |
 
@@ -100,6 +100,15 @@ it needs to reach archive.org). Titles are matched on IGDB through RetroArr for 
 four a second. Confident matches are chosen; the rest wait on a review page, where the admin picks a
 candidate, searches, or skips each one, then saves. A ★ puts a series or list in Discover's
 "Featured collections" row.
+
+### Playing it: RomM
+
+RomM's library is what counts as owned. RetroArr's RomM sync (RetroArr → Settings → RomM)
+keeps RetroArr's library in step with RomM and records each game's RomM id. With that:
+- a game page shows **Play in RomM** for each platform RomM has it on, or **In the library** while
+  RomM hasn't scanned it yet;
+- a ready request gets **Play in RomM**, linking to the game itself (`ROMM_URL/rom/<id>`). Until
+  RomM has the game, which is usually within the hour of the import, it says it's being added.
 
 ### RetroArr webhook
 

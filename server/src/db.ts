@@ -169,6 +169,10 @@ const MIGRATIONS: string[] = [
     last_message TEXT
   );
   `,
+  // 8: the game in RomM, once RetroArr's RomM sync has seen it there ("Play in RomM" opens it)
+  `
+  ALTER TABLE requests ADD COLUMN romm_id INTEGER;
+  `,
 ];
 
 export function openDb(path: string): Db {

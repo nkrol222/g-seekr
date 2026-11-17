@@ -61,6 +61,8 @@ export class Fakes {
   franchises = new Map<number, { name: string; games: number[] }>([[5, { name: 'Final Fantasy', games: [427, 1020] }]]);
   // Titles IGDB "finds" for POST /discover/match: title → [igdbId, similarity][]
   matches = new Map<string, Array<[number, number]>>();
+  // RetroArr's RomM sync: the RomM id of each RetroArr game RomM has
+  rommIds = new Map<number, number>();
   // Files of Internet Archive items
   archiveItems = new Map<string, Array<{ name: string; source?: string }>>();
 
@@ -207,7 +209,7 @@ export class Fakes {
         return json({
           games: (body.igdbIds as number[]).map((igdbId) => ({
             igdbId,
-            library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status })),
+            library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status, rommId: this.rommIds.get(x.id) ?? null })),
           })),
         });
       }
@@ -249,7 +251,7 @@ export class Fakes {
       ratingCount: 100,
       genres: ['Role-playing (RPG)'],
       platformIds: g.platforms,
-      library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status })),
+      library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status, rommId: this.rommIds.get(x.id) ?? null })),
     };
   }
 

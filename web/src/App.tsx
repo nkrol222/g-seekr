@@ -110,7 +110,7 @@ export function App() {
       )}
       {view === 'import' && <ImportStart key={route.params.toString()} listId={num('list')} platformId={num('platform')} />}
       {view === 'import-review' && <ImportReview id={num('id')!} />}
-      {view === 'game' && <GamePage igdbId={Number(route.params.get('id'))} onRequested={refreshMe} />}
+      {view === 'game' && <GamePage igdbId={Number(route.params.get('id'))} rommUrl={me.rommUrl} onRequested={refreshMe} />}
       {view === 'requests' && <Requests me={me} filter={isFilter(filter) ? filter : admin ? 'open' : 'all'} onChanged={refreshMe} />}
       {view === 'issues' && <Issues me={me} onChanged={refreshMe} />}
       {view === 'users' && <AdminUsers me={me} />}

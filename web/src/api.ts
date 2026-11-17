@@ -26,6 +26,9 @@ export interface SearchResult {
 
 // A game in Discover, Browse and search: the platforms it can be requested for, whether the library has it, its requests
 export interface GameCard extends SearchResult {
+  // The platforms the library has it on, and the game in RomM on each (for "Play in RomM")
+  inLibrary?: number[];
+  romm?: { platformId: number; rommId: number }[];
   rating: number | null;
   ratingCount: number | null;
   genres: string[];
@@ -143,6 +146,8 @@ export interface GameRequest {
   createdAt: string;
   updatedAt: string;
   availableAt: string | null;
+  // The game in RomM, once RomM has it (RomM scans new games within the hour)
+  rommId: number | null;
 }
 
 // What the download client is doing for a game RetroArr is fetching
