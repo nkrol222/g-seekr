@@ -38,7 +38,7 @@ They need `RETROARR_WEBHOOK_TOKEN`; see "RetroArr webhook" below. Every `POLL_SE
 
 - **One open request per game and platform.** A second request is refused with "already requested". A game that's already downloaded is refused with "already in the library".
 - **Request limit:** `REQUEST_LIMIT` per user every `REQUEST_LIMIT_DAYS`. Admins can change the limit per user. Admins themselves have no limit.
-- **Platforms:** only those enabled in RetroArr, optionally narrowed with `ALLOWED_PLATFORMS`. A game can only be requested for platforms IGDB lists it on.
+- **Platforms:** exactly those enabled in RetroArr (Settings → Platforms); a change there shows within two minutes. A game can only be requested for platforms IGDB lists it on.
 - **Admins** are Jellyfin admins (unless `JELLYFIN_ADMINS_ARE_ADMINS=false`) and anyone made admin on the Users page. The first Jellyfin admin to sign in always becomes one.
 - **Withdrawing:** requesters can withdraw their own pending requests. Admins can remove any request; RetroArr keeps the game.
 
@@ -72,6 +72,21 @@ user then makes a client token in RomM (**Settings → Client API Tokens**, scop
 profile" and "View ROMs") and pastes it under **Account → RomM link**. g-seekr checks that the
 token's RomM username is the user's own (usernames match between Jellyfin and RomM), keeps it in
 its database, and never sends it back to the browser.
+
+### Collections
+
+The **Collections** page (and Discover's collection rows) shows IGDB series and lists. On a
+collection the user picks a platform, sees how much of it the library has ("3 of 5 on
+PlayStation"), and **Request missing** makes one request per game that the library doesn't have and
+nobody has requested yet. Each counts against the user's limit and is approved like any other
+request; games not on that platform are greyed out.
+
+Admins make lists by hand or import them (**Collections → Import a list**) from pasted titles, a
+No-Intro or Redump DAT, or an Internet Archive item (g-seekr reads `archive.org/metadata/<id>`, so
+it needs to reach archive.org). Titles are matched on IGDB through RetroArr for one platform, about
+four a second. Confident matches are chosen; the rest wait on a review page, where the admin picks a
+candidate, searches, or skips each one, then saves. A ★ puts a series or list in Discover's
+"Featured collections" row.
 
 ### RetroArr webhook
 

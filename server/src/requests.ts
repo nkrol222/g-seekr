@@ -29,7 +29,8 @@ export interface Logger {
   error: (msg: string) => void;
 }
 
-const PLATFORM_CACHE_MS = 10 * 60_000;
+// A platform switched on or off in RetroArr shows here within two minutes
+const PLATFORM_CACHE_MS = 2 * 60_000;
 
 // The request lifecycle:
 //   pending ──approve──▶ approved ──handed to RetroArr──▶ searching ──▶ downloading ──▶ available
@@ -56,8 +57,8 @@ export class RequestService {
   async platforms(): Promise<RetroArrPlatform[]> {
     const cached = this.platformCache;
     if (cached && this.now().getTime() - cached.at < PLATFORM_CACHE_MS) return cached.list;
-    const allowed = this.config.allowedPlatforms;
-    const list = (await this.retroarr.platforms()).filter((p) => p.enabled && (!allowed || allowed.includes(p.slug)));
+    // Exactly what's enabled in RetroArr (Settings → Platforms): enable or disable a platform there
+    const list = (await this.retroarr.platforms()).filter((p) => p.enabled);
     list.sort((a, b) => a.name.localeCompare(b.name));
     this.platformCache = { at: this.now().getTime(), list };
     return list;

@@ -72,14 +72,25 @@ export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested:
 
   const g = page.game;
   const status = cardStatus(g);
-  const facts: [string, string][] = [
+  const seriesRefs = page.seriesRefs ?? [];
+  const facts: [string, React.ReactNode][] = [
     ['Released', page.releases.find((r) => r.date)?.date ?? (g.year ? String(g.year) : '')],
     ['Developer', page.developers.join(', ')],
     ['Publisher', page.publishers.join(', ')],
     ['Genres', g.genres.join(', ')],
     ['Themes', page.themes.join(', ')],
     ['Modes', page.gameModes.join(', ')],
-    ['Series', page.franchises.join(', ')],
+    [
+      'Series',
+      seriesRefs.length > 0
+        ? seriesRefs.map((r, i) => (
+            <span key={r.id}>
+              {i > 0 && ', '}
+              <a href={`#/collection/series/${r.id}`}>{r.name}</a>
+            </span>
+          ))
+        : page.franchises.join(', '),
+    ],
   ];
   const statusFor = (platformId: number): RequestStatus | null => g.requests.find((r) => r.platformId === platformId)?.status ?? null;
 
@@ -237,13 +248,25 @@ export function GamePage({ igdbId, onRequested }: { igdbId: number; onRequested:
       </div>
 
       {[
-        ['More from this series', page.series ?? []],
+        [
+          seriesRefs.length > 0 ? (
+            <>
+              More from this series{' '}
+              <a className="head-link" href={`#/collection/series/${seriesRefs[0]!.id}`}>
+                See the collection →
+              </a>
+            </>
+          ) : (
+            'More from this series'
+          ),
+          page.series ?? [],
+        ],
         [page.developer ? `More from ${page.developer}` : 'More from the developer', page.fromDeveloper ?? []],
       ].map(([title, games]) =>
         (games as typeof page.similar).length > 0 ? (
-          <section key={title as string} className="slider">
+          <section key={typeof title === 'string' ? title : 'series'} className="slider">
             <div className="slider-head">
-              <h2>{title as string}</h2>
+              <h2>{title as React.ReactNode}</h2>
             </div>
             <div className="slider-track">
               {(games as typeof page.similar).map((s) => (

@@ -4,6 +4,7 @@ import { useFilters } from './Filters';
 import { Alert, Icon, Poster, StatusBadge } from './shared';
 import { GameRow, TitleCard } from './Titles';
 import { reasonText, useRecommendations } from './ForYou';
+import { CollectionRow, useCollectionRows } from './Collections';
 
 // Seerr's Discover: a welcome, then rows of posters. The game rows follow only the user's adult-games switch;
 // the Browse page has the full filters.
@@ -13,6 +14,7 @@ export function Discover({ me }: { me: Me }) {
   const [error, setError] = useState<string | null>(null);
   const { filters } = useFilters();
   const { recs, dismiss } = useRecommendations();
+  const { rows: collections } = useCollectionRows();
 
   useEffect(() => {
     api
@@ -64,6 +66,12 @@ export function Discover({ me }: { me: Me }) {
           </div>
         </section>
       )}
+      {collections && (
+        <>
+          <CollectionRow title="Featured collections" cards={collections.featured} link="#/collections" />
+          <CollectionRow title="Your collections in progress" cards={collections.inProgress} link="#/collections" />
+        </>
+      )}
       {filters && (
         <>
           <GameRow title="Popular right now" link="#/browse?list=popular" load={async () => (await api.discover({ list: 'popular', filters: adultOnly })).games} />
@@ -71,6 +79,7 @@ export function Discover({ me }: { me: Me }) {
           <GameRow title="Recently added to the library" empty="Nothing imported yet." load={async () => (await api.recentlyAdded()).games} />
         </>
       )}
+      {collections && <CollectionRow title="Popular collections" cards={collections.popular} link="#/collections" />}
       <RequestRow title={me.user.isAdmin ? 'Recent requests' : 'Your recent requests'} requests={recent} showUser={me.user.isAdmin} link="#/requests" />
       <RequestRow title="Ready to play" requests={ready} link="#/requests?filter=available" />
       {recs?.because.map((b) => (

@@ -103,6 +103,60 @@ const MIGRATIONS: string[] = [
     last_error TEXT
   );
   `,
+  // 6: collections: lists admins curate or import (a game on a platform per entry), series pinned to Discover,
+  // and imports waiting for review
+  `
+  CREATE TABLE lists (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    source TEXT,
+    featured INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE list_items (
+    list_id INTEGER NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+    igdb_id INTEGER NOT NULL,
+    platform_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    year INTEGER,
+    cover_url TEXT,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (list_id, igdb_id, platform_id)
+  );
+  CREATE TABLE featured_series (
+    franchise_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE imports (
+    id INTEGER PRIMARY KEY,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    list_id INTEGER REFERENCES lists(id) ON DELETE SET NULL,
+    list_name TEXT NOT NULL,
+    platform_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    total INTEGER NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE import_items (
+    import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    raw TEXT NOT NULL,
+    title TEXT NOT NULL,
+    state TEXT NOT NULL,
+    choice TEXT,
+    candidates TEXT,
+    skip INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (import_id, idx)
+  );
+  `,
 ];
 
 export function openDb(path: string): Db {

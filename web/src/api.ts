@@ -80,6 +80,8 @@ export interface GamePage {
   developers: string[];
   publishers: string[];
   franchises: string[];
+  // Its series, each a collection page
+  seriesRefs?: FilterOption[];
   releases: { platform: string; platformId: number | null; date: string | null; requestable: boolean }[];
   similar: GameCard[];
   series: GameCard[];
@@ -203,6 +205,100 @@ export interface AdminUser {
   limits: { limit: number; days: number; used: number };
 }
 
+// ---- collections ----
+
+export type CollectionKind = 'series' | 'list';
+
+export interface CollectionCard {
+  kind: CollectionKind;
+  id: number;
+  name: string;
+  covers: string[];
+  total: number;
+  inLibrary: number;
+}
+
+export interface CollectionGame {
+  igdbId: number;
+  title: string;
+  year: number | null;
+  coverUrl: string | null;
+  rating: number | null;
+  platformIds: number[];
+  inLibrary: number[];
+  requests: { id: number; platformId: number; status: RequestStatus }[];
+}
+
+export interface CollectionPage {
+  kind: CollectionKind;
+  id: number;
+  name: string;
+  description: string | null;
+  source: string | null;
+  featured: boolean;
+  platforms: { id: number; name: string; total: number; inLibrary: number }[];
+  games: CollectionGame[];
+}
+
+export interface CollectionRows {
+  featured: CollectionCard[];
+  popular: CollectionCard[];
+  inProgress: CollectionCard[];
+  lists: CollectionCard[];
+}
+
+export interface RequestMissingResult {
+  requested: { igdbId: number; title: string }[];
+  skipped: { igdbId: number; title: string; reason: string }[];
+  limitReached: boolean;
+}
+
+export interface CuratedList {
+  id: number;
+  name: string;
+  description: string | null;
+  source: string | null;
+  featured: boolean;
+  itemCount: number;
+}
+
+export interface GameRef {
+  igdbId: number;
+  title: string;
+  year: number | null;
+  coverUrl: string | null;
+}
+
+export type ImportStatus = 'matching' | 'review' | 'saved' | 'failed';
+export type ImportItemState = 'pending' | 'matched' | 'uncertain' | 'unmatched';
+
+export interface ImportJob {
+  id: number;
+  listId: number | null;
+  listName: string;
+  platformId: number;
+  source: string;
+  status: ImportStatus;
+  total: number;
+  done: number;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface ImportItem {
+  idx: number;
+  raw: string;
+  title: string;
+  state: ImportItemState;
+  choice: GameRef | null;
+  candidates: (GameRef & { similarity: number })[];
+  skip: boolean;
+}
+
+export type ImportSource = { kind: 'titles' | 'dat'; text: string } | { kind: 'archive'; item: string };
+
+const collectionPath = (kind: CollectionKind, id: number) => `/collections/${kind === 'series' ? 'series' : 'lists'}/${id}`;
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -259,6 +355,23 @@ export const api = {
   romm: () => call<RommStatus>('GET', '/me/romm'),
   linkRomm: (token: string) => call<RommStatus>('PUT', '/me/romm', { token }),
   unlinkRomm: () => call<RommStatus>('DELETE', '/me/romm'),
+  collections: () => call<CollectionRows>('GET', '/collections'),
+  collection: (kind: CollectionKind, id: number) => call<CollectionPage>('GET', collectionPath(kind, id)),
+  searchSeries: (query: string) => call<{ series: { id: number; name: string; gameCount: number }[] }>('GET', `/collections/series?query=${encodeURIComponent(query)}`),
+  requestMissing: (kind: CollectionKind, id: number, platformId: number) => call<RequestMissingResult>('POST', `${collectionPath(kind, id)}/request-missing`, { platformId }),
+  featureSeries: (id: number, name: string, featured: boolean) => call<{ featured: boolean }>('PUT', `/collections/series/${id}/featured`, { name, featured }),
+  createList: (name: string, description: string) => call<{ list: CuratedList }>('POST', '/lists', { name, description }),
+  updateList: (id: number, patch: Partial<{ name: string; description: string | null; featured: boolean }>) => call<{ list: CuratedList }>('PATCH', `/lists/${id}`, patch),
+  deleteList: (id: number) => call<void>('DELETE', `/lists/${id}`),
+  addToList: (id: number, game: GameRef, platformId: number) => call<{ added: number }>('POST', `/lists/${id}/items`, { ...game, platformId }),
+  removeFromList: (id: number, igdbId: number, platformId: number) => call<void>('DELETE', `/lists/${id}/items/${igdbId}/${platformId}`),
+  imports: () => call<{ imports: ImportJob[] }>('GET', '/imports'),
+  startImport: (body: ImportSource & { platformId: number; listName?: string; listId?: number }) => call<{ import: ImportJob }>('POST', '/imports', body),
+  importReview: (id: number) => call<{ import: ImportJob; items: ImportItem[] }>('GET', `/imports/${id}`),
+  chooseImportItem: (id: number, idx: number, patch: { choice?: GameRef | null; skip?: boolean }) => call<{ item: ImportItem }>('PATCH', `/imports/${id}/items/${idx}`, patch),
+  retryImport: (id: number) => call<{ import: ImportJob }>('POST', `/imports/${id}/retry`, {}),
+  saveImport: (id: number) => call<{ list: CuratedList; added: number }>('POST', `/imports/${id}/save`, {}),
+  discardImport: (id: number) => call<void>('DELETE', `/imports/${id}`),
   users: () => call<{ users: AdminUser[] }>('GET', '/admin/users'),
   updateUser: (id: number, patch: Partial<{ isAdmin: boolean; autoApprove: boolean; requestLimit: number | null }>) =>
     call<{ user: AdminUser }>('PATCH', `/admin/users/${id}`, patch),

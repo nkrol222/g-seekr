@@ -23,6 +23,7 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 | Detail page per title: overview, cast, trailers, ratings, where it's available | Done: a game page with backdrop, summary and story, request per platform, trailers, screenshots, facts, first release per platform, similar games | – | – |
 | "Recommendations" and "Similar" on each title | Done: similar games, more from the series and more from the developer on the game page | – | – |
 | Personal recommendations (from your watch history and watchlist) | Done: a For you page and Discover rows from requests, likes and RomM play history (each user links their own RomM token), with the reasons; "not interested" hides a game | Weigh what the household plays | – |
+| Collections (a film series), with what's available and "Request collection" | Done: a Collections page and Discover rows (featured, popular, yours in progress). A collection is an IGDB series or a list admins put together or import (plain titles, a No-Intro/Redump DAT, an Internet Archive item; uncertain matches are reviewed before saving). The user picks a platform; "Request missing" makes one request per game the library doesn't have, within their limit | Fetch a whole collection from the Internet Archive as one download | An Internet Archive source in RetroArr |
 | Watchlist, with auto-request from a Plex/Jellyfin watchlist | None | A "want to play" list per user, with optional auto-request when a game releases. Pairs with upcoming releases | RSS, so a new release is grabbed promptly |
 | Hide titles (blocklist) | None | Admins hide a game or a whole platform from discovery and search | – |
 
@@ -64,7 +65,7 @@ Seerr opens on discovery. g-seekr opens on an empty search box.
 
 | Seerr | g-seekr today | To close it | Depends on |
 |---|---|---|---|
-| Configured in the web UI (servers, profiles, users, notifications) | Environment variables only | A Settings page for what changes at runtime (limits, platforms, notifications); secrets stay in env | – |
+| Configured in the web UI (servers, profiles, users, notifications) | Environment variables only | A Settings page for what changes at runtime (limits, notifications); secrets stay in env. The requestable platforms already follow RetroArr's enabled platforms | – |
 | Several Sonarr/Radarr servers, and a default per type | One RetroArr | Several RetroArr instances or profiles, e.g. a separate one for PC games | A4 |
 | API with an API key; Homepage widget type | Session-cookie API; Homepage shows only up/down | API keys for integrations; a summary endpoint (pending, processing, available counts) that Homepage's `customapi` widget can read | – |
 | ~~Status updates in real time~~ | Done: RetroArr's webhooks, with the 5-minute poll as a backstop | – | – |

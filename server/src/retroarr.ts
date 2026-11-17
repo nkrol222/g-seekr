@@ -84,6 +84,8 @@ export interface RetroArrDiscoverDetail {
   series: RetroArrDiscoverGame[];
   developer: string | null;
   fromDeveloper: RetroArrDiscoverGame[];
+  // Its series, to link to their collection pages
+  seriesRefs: DiscoverOption[];
 }
 
 function toDiscoverGame(g: Record<string, unknown>): RetroArrDiscoverGame {
@@ -290,6 +292,10 @@ export class RetroArrClient {
         series: (Array.isArray(d.series) ? d.series : []).map((g) => toDiscoverGame(g as Record<string, unknown>)),
         developer: typeof d.developer === 'string' ? d.developer : null,
         fromDeveloper: (Array.isArray(d.fromDeveloper) ? d.fromDeveloper : []).map((g) => toDiscoverGame(g as Record<string, unknown>)),
+        seriesRefs: (Array.isArray(d.seriesRefs) ? d.seriesRefs : []).map((r) => {
+          const o = r as Record<string, unknown>;
+          return { id: Number(o.id), name: String(o.name ?? '') };
+        }),
       };
     } catch (err) {
       if (err instanceof RetroArrError && err.status === 404) return null;
@@ -302,6 +308,65 @@ export class RetroArrClient {
     const list = (v: unknown): DiscoverOption[] =>
       (Array.isArray(v) ? v : []).map((x) => x as Record<string, unknown>).map((x) => ({ id: Number(x.id), name: String(x.name ?? '') })).filter((x) => x.id > 0 && x.name);
     return { genres: list(o.genres), themes: list(o.themes), gameModes: list(o.gameModes) };
+  }
+
+  // ---- collections ----
+
+  async series(franchiseId: number, includeAdult: boolean): Promise<{ id: number; name: string; games: RetroArrDiscoverGame[] } | null> {
+    try {
+      const s = await this.call<Record<string, unknown>>('GET', `/discover/series/${franchiseId}?includeAdult=${includeAdult}`, undefined, 60_000);
+      return { id: Number(s.id), name: String(s.name ?? ''), games: (Array.isArray(s.games) ? s.games : []).map((g) => toDiscoverGame(g as Record<string, unknown>)) };
+    } catch (err) {
+      if (err instanceof RetroArrError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async searchSeries(query: string): Promise<{ id: number; name: string; gameCount: number }[]> {
+    const res = await this.call<{ series?: Array<Record<string, unknown>> }>('GET', `/discover/series?query=${encodeURIComponent(query)}`);
+    return (res.series ?? []).map((s) => ({ id: Number(s.id), name: String(s.name ?? ''), gameCount: Number(s.gameCount ?? 0) }));
+  }
+
+  // Each game's series
+  async seriesOf(igdbIds: number[]): Promise<Map<number, DiscoverOption[]>> {
+    const map = new Map<number, DiscoverOption[]>();
+    for (let i = 0; i < igdbIds.length; i += 2000) {
+      const res = await this.call<{ games?: Array<{ igdbId: number; series?: DiscoverOption[] }> }>('POST', '/discover/series-of', { igdbIds: igdbIds.slice(i, i + 2000) }, 60_000);
+      for (const g of res.games ?? []) map.set(Number(g.igdbId), (g.series ?? []).map((s) => ({ id: Number(s.id), name: String(s.name) })));
+    }
+    return map;
+  }
+
+  // What the library has of each game, per platform
+  async libraryOf(igdbIds: number[]): Promise<Map<number, RetroArrDiscoverGame['library']>> {
+    const map = new Map<number, RetroArrDiscoverGame['library']>();
+    for (let i = 0; i < igdbIds.length; i += 5000) {
+      const res = await this.call<{ games?: Array<{ igdbId: number; library?: unknown[] }> }>('POST', '/discover/library', { igdbIds: igdbIds.slice(i, i + 5000) });
+      for (const g of res.games ?? []) {
+        map.set(
+          Number(g.igdbId),
+          (g.library ?? []).map((l) => {
+            const o = l as Record<string, unknown>;
+            return { gameId: Number(o.gameId), platformId: Number(o.platformId), status: gameStatus(o.status) };
+          }),
+        );
+      }
+    }
+    return map;
+  }
+
+  // Titles from an imported list, found on IGDB for one platform (at most 20 a call)
+  async match(platformId: number, titles: string[]): Promise<{ title: string; candidates: { game: RetroArrDiscoverGame; similarity: number }[] }[]> {
+    const res = await this.call<{ results?: Array<{ title: string; candidates?: Array<{ game: Record<string, unknown>; similarity: number }> }> }>(
+      'POST',
+      '/discover/match',
+      { platformId, titles },
+      120_000,
+    );
+    return (res.results ?? []).map((r) => ({
+      title: String(r.title),
+      candidates: (r.candidates ?? []).map((c) => ({ game: toDiscoverGame(c.game), similarity: Number(c.similarity) })),
+    }));
   }
 
   async recentlyAdded(limit: number): Promise<RetroArrDiscoverGame[]> {
