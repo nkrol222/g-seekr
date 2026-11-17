@@ -34,6 +34,19 @@ RetroArr's webhooks move a request as things happen: a grab makes it `downloadin
 They need `RETROARR_WEBHOOK_TOKEN`; see "RetroArr webhook" below. Every `POLL_SECONDS` (default
 5 minutes), g-seekr also checks the games it handed off, which catches anything a webhook missed.
 
+### Tasks
+
+Admins see g-seekr's timed jobs under **Tasks**: how often each runs (changeable there; the
+interval is kept in the database), how the last run went, when the next one is, and **Run now**.
+They run one at a time, and after a restart each waits its own delay, so RetroArr isn't asked for
+everything at once:
+
+| Task | Default | What it does |
+|---|---|---|
+| Follow requests | `POLL_SECONDS` (5 min) | The backstop for missed webhooks. |
+| Warm up Discover | 5 h | Loads Discover's rows and the popular collections ahead of time, so the page opens fast. RetroArr keeps IGDB answers for 6 h. |
+| Housekeeping | 24 h | Deletes expired sign-ins, and list imports saved more than 30 days ago. |
+
 ## Rules
 
 - **One open request per game and platform.** A second request is refused with "already requested". A game that's already downloaded is refused with "already in the library".

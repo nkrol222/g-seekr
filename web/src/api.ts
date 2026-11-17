@@ -299,6 +299,25 @@ export type ImportSource = { kind: 'titles' | 'dat'; text: string } | { kind: 'a
 
 const collectionPath = (kind: CollectionKind, id: number) => `/collections/${kind === 'series' ? 'series' : 'lists'}/${id}`;
 
+export interface AdminTask {
+  key: string;
+  name: string;
+  description: string;
+  intervalSeconds: number;
+  minSeconds: number;
+  maxSeconds: number;
+  canTurnOff: boolean;
+  running: boolean;
+  queued: boolean;
+  startedAt: string | null;
+  lastStarted: string | null;
+  lastFinished: string | null;
+  lastDurationMs: number | null;
+  lastOutcome: 'succeeded' | 'failed' | 'skipped' | null;
+  lastMessage: string | null;
+  nextRun: string | null;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -372,6 +391,9 @@ export const api = {
   retryImport: (id: number) => call<{ import: ImportJob }>('POST', `/imports/${id}/retry`, {}),
   saveImport: (id: number) => call<{ list: CuratedList; added: number }>('POST', `/imports/${id}/save`, {}),
   discardImport: (id: number) => call<void>('DELETE', `/imports/${id}`),
+  tasks: () => call<{ tasks: AdminTask[] }>('GET', '/admin/tasks'),
+  setTaskInterval: (key: string, intervalSeconds: number) => call<{ task: AdminTask }>('PUT', `/admin/tasks/${key}`, { intervalSeconds }),
+  runTask: (key: string) => call<{ task: AdminTask }>('POST', `/admin/tasks/${key}/run`, {}),
   users: () => call<{ users: AdminUser[] }>('GET', '/admin/users'),
   updateUser: (id: number, patch: Partial<{ isAdmin: boolean; autoApprove: boolean; requestLimit: number | null }>) =>
     call<{ user: AdminUser }>('PATCH', `/admin/users/${id}`, patch),

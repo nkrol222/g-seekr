@@ -810,3 +810,53 @@ describe('collections', () => {
     expect((await get('/api/imports', root.headers)).json().imports).toHaveLength(0);
   });
 });
+
+describe('tasks', () => {
+  it('lists the timed jobs for admins, runs one now, and checks intervals', async () => {
+    await start();
+    const root = await login('root');
+    const a = await login('alice');
+    expect((await built.app.inject({ url: '/api/admin/tasks', headers: a.headers })).statusCode).toBe(403);
+
+    const list = (await built.app.inject({ url: '/api/admin/tasks', headers: root.headers })).json().tasks;
+    expect(list.map((t: { key: string }) => t.key)).toEqual(['request-sync', 'warm-discover', 'housekeeping']);
+    // Never run: each waits its own delay after start
+    expect(list[0]).toMatchObject({ intervalSeconds: 300, lastOutcome: null, nextRun: new Date(clock.getTime() + 30_000).toISOString() });
+
+    // Nothing to follow: skipped, and says so
+    const run = (key: string) => built.app.inject({ method: 'POST', url: `/api/admin/tasks/${key}/run`, headers: root.headers });
+    expect((await run('request-sync')).statusCode).toBe(202);
+    await built.tasks.idle();
+    expect(built.tasks.status('request-sync')).toMatchObject({ lastOutcome: 'skipped', lastMessage: 'No open requests' });
+
+    // With a request RetroArr is working on: checked, and the next run counts from this one
+    await built.app.inject({ method: 'POST', url: '/api/requests', headers: root.headers, payload: { igdbId: 1020, platformId: 41 } });
+    await run('request-sync');
+    await built.tasks.idle();
+    expect(built.tasks.status('request-sync')).toMatchObject({ lastOutcome: 'succeeded', lastMessage: '1 open request(s) checked, 0 changed' });
+    expect(built.tasks.nextRun('request-sync')!.getTime()).toBe(clock.getTime() + 300_000);
+
+    // Warm-up: Discover's rows (popular, top, one per platform) and the recently added
+    fakes.discoverBodies = [];
+    await run('warm-discover');
+    await built.tasks.idle();
+    expect(built.tasks.status('warm-discover')).toMatchObject({ lastOutcome: 'succeeded', lastMessage: '4 row(s) loaded; 0 popular collection(s)' });
+    expect(fakes.discoverBodies.map((b) => [b.list, b.platformIds])).toEqual([
+      ['popular', [50, 41]],
+      ['top', [50, 41]],
+      ['popular', [50]],
+      ['popular', [41]],
+    ]);
+    fakes.igdbDown = true;
+    await run('warm-discover');
+    await built.tasks.idle();
+    expect(built.tasks.status('warm-discover')).toMatchObject({ lastOutcome: 'failed', lastMessage: expect.stringMatching(/couldn’t load any/) });
+
+    const put = (key: string, intervalSeconds: unknown) => built.app.inject({ method: 'PUT', url: `/api/admin/tasks/${key}`, headers: root.headers, payload: { intervalSeconds } });
+    expect((await put('request-sync', 10)).json().error).toMatch(/runs every 30 s to 1 h/);
+    expect((await put('request-sync', 0)).json().error).toMatch(/can’t be turned off/);
+    expect((await put('warm-discover', 0)).json().task).toMatchObject({ intervalSeconds: 0, nextRun: null });
+    expect((await put('request-sync', 120)).json().task.intervalSeconds).toBe(120);
+    expect((await put('nope', 120)).statusCode).toBe(404);
+  });
+});

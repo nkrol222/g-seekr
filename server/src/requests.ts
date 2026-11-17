@@ -221,9 +221,12 @@ export class RequestService {
     }
   }
 
-  // One pass of the poller: follow every request RetroArr is working on
-  async poll(): Promise<void> {
-    for (const request of this.store.listRequests({ statuses: TRACKED_STATUSES })) {
+  // One pass of the poller: follow every request RetroArr is working on. Returns a summary for the Tasks page.
+  async poll(): Promise<string> {
+    const tracked = this.store.listRequests({ statuses: TRACKED_STATUSES });
+    let changed = 0;
+    let errors = 0;
+    for (const request of tracked) {
       try {
         if (request.retroarrGameId === null) {
           // Approved but the hand-off never finished (the app restarted halfway)
@@ -240,13 +243,21 @@ export class RequestService {
         // RetroArr's game status says nothing of a grab: a request a webhook marked downloading stays so
         // until the import or failure webhook (or the import itself) moves it on
         const grabbed = request.status === 'downloading' && request.release !== null && next === 'searching';
-        if (next === 'available') this.markAvailable(request, game.id);
-        else if (next !== request.status && !grabbed) this.store.updateRequest(request.id, { status: next });
+        if (next === 'available') {
+          this.markAvailable(request, game.id);
+          changed++;
+        } else if (next !== request.status && !grabbed) {
+          this.store.updateRequest(request.id, { status: next });
+          changed++;
+        }
       } catch (err) {
         // RetroArr down: leave the request as it is and try again next time
+        errors++;
         this.log.warn(`poll: request ${request.id}: ${(err as Error).message}`);
       }
     }
+    if (errors > 0 && errors === tracked.length) throw new Error(`RetroArr couldn’t be asked about any of the ${tracked.length} open requests.`);
+    return `${tracked.length} open request(s) checked, ${changed} changed` + (errors ? `, ${errors} couldn’t be checked` : '');
   }
 
   // RetroArr's webhooks, for every request it is working on for that game. The poller stays as the backstop for a

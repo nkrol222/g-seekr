@@ -10,7 +10,7 @@ const config = loadConfig();
 const db = openDb(join(config.dataDir, 'g-seekr.db'));
 const here = dirname(fileURLToPath(import.meta.url));
 
-const { app, requests, collections } = await buildApp({
+const { app, requests, collections, tasks } = await buildApp({
   config,
   db,
   jellyfin: new JellyfinClient(config.jellyfinUrl),
@@ -18,18 +18,8 @@ const { app, requests, collections } = await buildApp({
   webDir: join(here, '..', 'web'),
 });
 
-// Follow handed-off requests until RetroArr has imported them
-let polling = false;
-const poll = async () => {
-  if (polling) return;
-  polling = true;
-  try {
-    await requests.poll();
-  } finally {
-    polling = false;
-  }
-};
-const timer = setInterval(() => void poll(), config.pollSeconds * 1000);
+// The timed jobs (following requests, warming Discover, housekeeping): Tasks page
+tasks.start();
 
 // Say early whether the token works, without refusing to start: RetroArr may just be down
 app.ready().then(async () => {
@@ -47,7 +37,7 @@ app.ready().then(async () => {
 });
 
 const shutdown = async () => {
-  clearInterval(timer);
+  tasks.stop();
   await app.close();
   db.close();
   process.exit(0);

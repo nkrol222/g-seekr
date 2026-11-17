@@ -157,6 +157,18 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (import_id, idx)
   );
   `,
+  // 7: the timed jobs' history and intervals (Tasks page)
+  `
+  CREATE TABLE tasks (
+    key TEXT PRIMARY KEY,
+    interval_seconds INTEGER,
+    last_started TEXT,
+    last_finished TEXT,
+    last_duration_ms INTEGER,
+    last_outcome TEXT,
+    last_message TEXT
+  );
+  `,
 ];
 
 export function openDb(path: string): Db {

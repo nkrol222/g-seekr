@@ -184,6 +184,22 @@ export class CollectionService {
     return cards;
   }
 
+  // For the warm-up task: works out the popular series again, as people without adult games see them
+  async refreshPopular(): Promise<number> {
+    this.popularCache.clear();
+    const counts = await this.seriesCounts(this.store.listRequests({}).map((r) => r.igdbId));
+    const top = [...counts.entries()].filter(([, c]) => c.games.size >= 2).sort((a, b) => b[1].games.size - a[1].games.size).slice(0, 10);
+    const cards: CollectionCard[] = [];
+    for (const [id] of top) {
+      const series = await this.retroarr.series(id, false).catch(() => null);
+      if (!series) continue;
+      const games = await this.games(series.games.map((g) => ({ game: g, platformIds: g.platformIds })));
+      cards.push(this.card({ kind: 'series', id, name: series.name, description: null, source: 'IGDB', featured: false, platforms: [], games }));
+    }
+    if (cards.length > 0) this.popularCache.set(false, { at: this.now().getTime(), cards });
+    return cards.length;
+  }
+
   // Series of the games this user requested or liked, where the library has some but not all
   async inProgress(user: User): Promise<CollectionCard[]> {
     const mine = [...this.store.listRequests({ userId: user.id }).map((r) => r.igdbId), ...this.store.likes(user.id).map((l) => l.igdbId)];

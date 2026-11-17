@@ -16,6 +16,7 @@ import { DiscoverService } from './discover.js';
 import { RecommendService } from './recommend.js';
 import { RommClient, RommError } from './romm.js';
 import { CollectionService } from './collections.js';
+import { TaskRunner, TaskSkipped } from './tasks.js';
 import { Store, type User } from './store.js';
 
 declare module 'fastify' {
@@ -64,6 +65,61 @@ export async function buildApp(deps: AppDeps) {
   const recommend = new RecommendService(config, store, discover, romm, log, deps.now);
   const collections = new CollectionService(db, store, deps.retroarr, requests, discover, log, deps.fetchImpl, deps.now);
   const limiter = new LoginLimiter();
+
+  // The timed jobs, one at a time (Tasks page). Started by index.ts, not here, so tests drive them by hand.
+  const tasks = new TaskRunner(
+    db,
+    [
+      {
+        key: 'request-sync',
+        name: 'Follow requests',
+        description: 'Asks RetroArr about every request it’s working on, in case a webhook was missed. With RetroArr’s webhook set up, this is only the backstop.',
+        defaultSeconds: config.pollSeconds,
+        minSeconds: 30,
+        maxSeconds: 3600,
+        canTurnOff: false,
+        firstRunMs: 30_000,
+        run: async () => {
+          if (store.listRequests({ statuses: ['approved', 'searching', 'downloading'] }).length === 0) throw new TaskSkipped('No open requests');
+          return requests.poll();
+        },
+      },
+      {
+        key: 'warm-discover',
+        name: 'Warm up Discover',
+        description: 'Loads Discover’s rows (popular, top rated, popular per platform) and the popular collections ahead of time, so the page opens fast. RetroArr keeps IGDB answers for 6 hours.',
+        defaultSeconds: 5 * 3600,
+        minSeconds: 3600,
+        maxSeconds: 24 * 3600,
+        canTurnOff: true,
+        firstRunMs: 2 * 60_000,
+        run: async () => {
+          const { loaded, failed } = await discover.warm();
+          if (loaded === 0 && failed > 0) throw new Error('RetroArr couldn’t load any of Discover’s rows (is IGDB set up and reachable?)');
+          const series = await collections.refreshPopular().catch(() => 0);
+          return `${loaded} row(s) loaded${failed ? `, ${failed} failed` : ''}; ${series} popular collection(s)`;
+        },
+      },
+      {
+        key: 'housekeeping',
+        name: 'Housekeeping',
+        description: 'Deletes expired sign-ins, and list imports saved more than 30 days ago (their games stay in the list).',
+        defaultSeconds: 24 * 3600,
+        minSeconds: 3600,
+        maxSeconds: 7 * 24 * 3600,
+        canTurnOff: false,
+        firstRunMs: 10 * 60_000,
+        run: async () => {
+          store.pruneSessions();
+          const now = deps.now?.() ?? new Date();
+          const imports = collections.lists.pruneSavedImports(new Date(now.getTime() - 30 * 86_400_000));
+          return `${imports} old import(s) removed`;
+        },
+      },
+    ],
+    log,
+    deps.now,
+  );
 
   app.decorate('requestService', requests);
   app.decorateRequest('user', null);
@@ -420,6 +476,26 @@ export async function buildApp(deps: AppDeps) {
     return reply.code(204).send();
   });
 
+  // ---- tasks (admin) ----
+
+  app.get('/api/admin/tasks', { preHandler: requireAdmin }, async () => ({ tasks: tasks.statuses() }));
+
+  app.put<{ Params: { key: string }; Body: { intervalSeconds?: unknown } }>('/api/admin/tasks/:key', { preHandler: requireAdmin }, async (req, reply) => {
+    if (!tasks.status(req.params.key)) return reply.code(404).send({ error: 'No such task.' });
+    try {
+      return { task: tasks.setInterval(req.params.key, Number(req.body?.intervalSeconds)) };
+    } catch (err) {
+      if (err instanceof RangeError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.post<{ Params: { key: string } }>('/api/admin/tasks/:key/run', { preHandler: requireAdmin }, async (req, reply) => {
+    if (!tasks.status(req.params.key)) return reply.code(404).send({ error: 'No such task.' });
+    if (!tasks.runNow(req.params.key)) return reply.code(409).send({ error: 'It’s already running or waiting its turn.', task: tasks.status(req.params.key) });
+    return reply.code(202).send({ task: tasks.status(req.params.key) });
+  });
+
   // ---- requests ----
 
   const idParam = (raw: string): number => {
@@ -540,7 +616,7 @@ export async function buildApp(deps: AppDeps) {
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found.' }));
   }
 
-  return { app, store, requests, issues, recommend, collections };
+  return { app, store, requests, issues, recommend, collections, tasks };
 }
 
 declare module 'fastify' {

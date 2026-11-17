@@ -7,12 +7,13 @@ import { GamePage } from './pages/Game';
 import { ForYou, RommLinkDialog } from './pages/ForYou';
 import { isFilter, Requests } from './pages/Requests';
 import { AdminUsers } from './pages/AdminUsers';
+import { AdminTasks } from './pages/AdminTasks';
 import { Issues } from './pages/Issues';
 import { Collections, CollectionView } from './pages/Collections';
 import { ImportReview, ImportStart } from './pages/Imports';
 import { Avatar, Icon, Mark, type IconName } from './pages/shared';
 
-type View = 'discover' | 'for-you' | 'browse' | 'search' | 'game' | 'collections' | 'collection' | 'import' | 'import-review' | 'requests' | 'issues' | 'users';
+type View = 'discover' | 'for-you' | 'browse' | 'search' | 'game' | 'collections' | 'collection' | 'import' | 'import-review' | 'requests' | 'issues' | 'users' | 'tasks';
 
 interface Route {
   view: View;
@@ -42,7 +43,7 @@ const parseHash = (): Route => {
     if (imp[1]) params.set('id', imp[1]);
     return { view: imp[1] ? 'import-review' : 'import', params };
   }
-  const view = (['for-you', 'browse', 'search', 'collections', 'requests', 'issues', 'users'] as const).find((v) => v === path) ?? 'discover';
+  const view = (['for-you', 'browse', 'search', 'collections', 'requests', 'issues', 'users', 'tasks'] as const).find((v) => v === path) ?? 'discover';
   // #/mine and #/queue were the old requests pages
   return { view: path === 'mine' || path === 'queue' ? 'requests' : view, params };
 };
@@ -81,7 +82,7 @@ export function App() {
   if (!me) return <Login onSignedIn={(m) => (setMe(m), void refreshMe())} />;
 
   const admin = me.user.isAdmin;
-  const view = !admin && (route.view === 'users' || route.view === 'import' || route.view === 'import-review') ? 'discover' : route.view;
+  const view = !admin && (route.view === 'users' || route.view === 'tasks' || route.view === 'import' || route.view === 'import-review') ? 'discover' : route.view;
   const num = (k: string) => Number(route.params.get(k)) || null;
   const filter = route.params.get('filter');
 
@@ -113,6 +114,7 @@ export function App() {
       {view === 'requests' && <Requests me={me} filter={isFilter(filter) ? filter : admin ? 'open' : 'all'} onChanged={refreshMe} />}
       {view === 'issues' && <Issues me={me} onChanged={refreshMe} />}
       {view === 'users' && <AdminUsers me={me} />}
+      {view === 'tasks' && <AdminTasks />}
     </Shell>
   );
 }
@@ -163,7 +165,12 @@ function Shell({
     { id: 'collections', label: 'Collections', icon: 'stack', href: '#/collections' },
     { id: 'requests', label: me.user.isAdmin ? 'Requests' : 'My requests', icon: 'clock', href: '#/requests', count: me.user.isAdmin ? pending : 0 },
     { id: 'issues', label: me.user.isAdmin ? 'Issues' : 'My problems', icon: 'flag', href: '#/issues', count: me.user.isAdmin ? openIssues : 0 },
-    ...(me.user.isAdmin ? [{ id: 'users' as const, label: 'Users', icon: 'users' as const, href: '#/users' }] : []),
+    ...(me.user.isAdmin
+      ? [
+          { id: 'users' as const, label: 'Users', icon: 'users' as const, href: '#/users' },
+          { id: 'tasks' as const, label: 'Tasks', icon: 'refresh' as const, href: '#/tasks' },
+        ]
+      : []),
   ];
 
   return (
