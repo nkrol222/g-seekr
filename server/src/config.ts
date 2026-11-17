@@ -26,8 +26,6 @@ export interface Config {
   // Requests per user per window; 0 = unlimited. Admins are never limited.
   requestLimit: number;
   requestLimitDays: number;
-  // RetroArr platform slugs people may request for; null = every platform RetroArr has enabled
-  allowedPlatforms: string[] | null;
   pollSeconds: number;
   sessionDays: number;
 }
@@ -84,7 +82,6 @@ export function loadConfig(env: Env = process.env): Config {
     return raw;
   };
 
-  const allowed = optional('ALLOWED_PLATFORMS');
   const config: Config = {
     host: str('HOST', '0.0.0.0'),
     port: int('PORT', 5056, 1),
@@ -102,7 +99,6 @@ export function loadConfig(env: Env = process.env): Config {
     jellyfinAdminsAreAdmins: bool('JELLYFIN_ADMINS_ARE_ADMINS', true),
     requestLimit: int('REQUEST_LIMIT', 10, 0),
     requestLimitDays: int('REQUEST_LIMIT_DAYS', 7, 1),
-    allowedPlatforms: allowed ? allowed.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) : null,
     pollSeconds: int('POLL_SECONDS', 300, 15),
     sessionDays: int('SESSION_DAYS', 30, 1),
   };

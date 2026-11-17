@@ -33,6 +33,9 @@ const timer = setInterval(() => void poll(), config.pollSeconds * 1000);
 
 // Say early whether the token works, without refusing to start: RetroArr may just be down
 app.ready().then(async () => {
+  if (process.env.ALLOWED_PLATFORMS?.trim()) {
+    app.log.warn('ALLOWED_PLATFORMS is ignored: people can request the platforms enabled in RetroArr (Settings → Platforms). Remove it from the env file.');
+  }
   try {
     await requests.platforms();
     app.log.info('RetroArr reachable, token accepted');

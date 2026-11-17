@@ -123,8 +123,9 @@ describe('sign-in', () => {
 });
 
 describe('search', () => {
-  it('lists only enabled (and allowed) platforms and shows open requests per platform', async () => {
-    await start({ ALLOWED_PLATFORMS: 'snes' });
+  it('lists the platforms enabled in RetroArr and shows open requests per platform', async () => {
+    fakes.platforms.find((p) => p.slug === 'psx')!.enabled = false;
+    await start();
     const { headers } = await login('alice');
     expect((await built.app.inject({ url: '/api/platforms', headers })).json().map((p: { slug: string }) => p.slug)).toEqual(['snes']);
 
@@ -134,6 +135,12 @@ describe('search', () => {
       expect.objectContaining({ igdbId: 1020, title: 'Chrono Trigger', platformIds: [41], requests: [expect.objectContaining({ platformId: 41, status: 'pending' })] }),
     ]);
     expect((await built.app.inject({ url: '/api/search?q=c', headers })).statusCode).toBe(400);
+
+    // A leftover ALLOWED_PLATFORMS doesn't narrow anything any more
+    await built.app.close();
+    await start({ ALLOWED_PLATFORMS: 'psx' });
+    const again = await login('alice');
+    expect((await built.app.inject({ url: '/api/platforms', headers: again.headers })).json().map((p: { slug: string }) => p.slug)).toEqual(['snes']);
   });
 });
 
@@ -483,10 +490,8 @@ describe('discovery', () => {
     built.app.inject({ method: 'POST', url: '/api/discover/games', headers, payload });
 
   it('lists games on requestable platforms only, with what the library and the requests have', async () => {
+    fakes.platforms.push({ id: 77, name: 'Arcade', slug: 'arcade', category: 'X', enabled: false }); // disabled in RetroArr
     await start();
-    const alice = await login('alice');
-    fakes.platforms.push({ id: 77, name: 'Arcade', slug: 'arcade', category: 'X', enabled: true });
-    await start({ ALLOWED_PLATFORMS: 'snes,psx' }); // the allow-list leaves Arcade out
     const a = await login('alice');
     await built.app.inject({ method: 'POST', url: '/api/requests', headers: a.headers, payload: { igdbId: 1020, platformId: 41 } });
 
@@ -495,7 +500,6 @@ describe('discovery', () => {
     expect(fakes.discoverBodies.at(-1)).toMatchObject({ list: 'popular', sort: 'popular', platformIds: [50, 41], includeAdult: false, offset: 0, limit: 30 });
     const chrono = res.json().games.find((g: { igdbId: number }) => g.igdbId === 1020);
     expect(chrono).toMatchObject({ title: 'Chrono Trigger', owned: false, platformIds: [41, 50], requests: [{ platformId: 41, status: 'pending' }] });
-    expect(alice).toBeTruthy();
   });
 
   it('narrows to the filter’s platforms, or one row’s, but never past what can be requested', async () => {

@@ -38,7 +38,7 @@ They need `RETROARR_WEBHOOK_TOKEN`; see "RetroArr webhook" below. Every `POLL_SE
 
 - **One open request per game and platform.** A second request is refused with "already requested". A game that's already downloaded is refused with "already in the library".
 - **Request limit:** `REQUEST_LIMIT` per user every `REQUEST_LIMIT_DAYS`. Admins can change the limit per user. Admins themselves have no limit.
-- **Platforms:** only those enabled in RetroArr, optionally narrowed with `ALLOWED_PLATFORMS`. A game can only be requested for platforms IGDB lists it on.
+- **Platforms:** exactly those enabled in RetroArr (Settings → Platforms); a change there shows within two minutes. A game can only be requested for platforms IGDB lists it on.
 - **Admins** are Jellyfin admins (unless `JELLYFIN_ADMINS_ARE_ADMINS=false`) and anyone made admin on the Users page. The first Jellyfin admin to sign in always becomes one.
 - **Withdrawing:** requesters can withdraw their own pending requests. Admins can remove any request; RetroArr keeps the game.
 
