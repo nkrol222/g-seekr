@@ -2299,3 +2299,104 @@ table.table {
     justify-self: start;
   }
 }
+
+/* ---------- request timeline ---------- */
+.step-line {
+  font-size: 0.85rem;
+  color: var(--gray-200);
+}
+.step-line.step-failed strong {
+  color: var(--red-400);
+}
+.step-admin,
+.tl-admin {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--gray-400);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.timeline {
+  margin-top: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.5rem;
+  background: rgba(17, 24, 39, 0.65);
+  border: 1px solid var(--gray-700);
+}
+.steps-track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tl-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  gap: 0.75rem;
+  padding-bottom: 0.9rem;
+}
+.tl-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: calc(0.8rem - 1px);
+  top: 1.6rem;
+  bottom: 0;
+  width: 2px;
+  background: var(--gray-700);
+}
+.tl-step.tl-done:not(:last-child)::before {
+  background: var(--green-600);
+}
+.tl-dot {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 2px solid var(--gray-600);
+  background: var(--gray-900);
+  color: #fff;
+}
+.tl-dot svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.tl-done .tl-dot {
+  border-color: var(--green-500);
+  background: var(--green-600);
+}
+.tl-current .tl-dot {
+  border-color: var(--indigo-400);
+  background: var(--indigo-600);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.25);
+}
+.tl-failed .tl-dot {
+  border-color: var(--red-400);
+  background: var(--red-600);
+}
+.tl-waiting .tl-body {
+  opacity: 0.55;
+}
+.tl-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+.tl-body p {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: var(--gray-300);
+}
+.tl-history ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--gray-300);
+}
+.tl-history li {
+  margin-bottom: 0.25rem;
+}
+.request-card .main-col > .link-button {
+  margin-top: 0.5rem;
+}

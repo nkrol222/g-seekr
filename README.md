@@ -24,6 +24,26 @@ browser ── g-seekr ──sign-in──▶ Jellyfin
 | `declined` | An admin said no, optionally with a note. |
 | `failed` | RetroArr refused or couldn't be reached. An admin can retry. |
 
+Each request on **Requests** shows where it's at in plain words, for example "Looking for a copy:
+no copy found yet. Next look today 6:00 pm". **Details** opens its timeline:
+
+| Step | What it says |
+|---|---|
+| Requested | when |
+| Approval / Approved | "Waiting for an admin to approve it" until then |
+| Looking for a copy | the outcome of RetroArr's last search and the next one |
+| Downloading | live progress |
+| Added to the library | when |
+| Ready in RomM | when, with a Play button |
+
+The search outcome is one of: no copy found yet; copies found but none good enough yet; found one;
+couldn't look just now. A History list underneath records each change.
+
+Admins also see the detail behind each step: the release, the best one RetroArr found and why it
+wasn't grabbed, who approved it, and the error. Users see plain steps only. The search status comes
+from RetroArr's `/api/v3/games/search-status` (fork). An older RetroArr just leaves out the search
+detail.
+
 The hand-off works like this:
 1. g-seekr reuses RetroArr's existing entry for that IGDB game and platform. If there isn't one, it adds the game with RetroArr's IGDB metadata.
 2. It sets the game to monitored.

@@ -126,6 +126,26 @@ export interface RommStatus extends RommLink {
 
 export const REASON_VERB: Record<SeedKind, string> = { requested: 'requested', played: 'played', liked: 'liked' };
 
+export type StepKey = 'requested' | 'approved' | 'looking' | 'downloading' | 'library' | 'romm';
+
+// One step of a request's timeline, in plain words; adminDetail only reaches admins
+export interface TimelineStep {
+  key: StepKey;
+  label: string;
+  state: 'done' | 'current' | 'waiting' | 'failed';
+  at: string | null;
+  detail: string | null;
+  adminDetail: string | null;
+  nextAt: string | null;
+  lastAt: string | null;
+}
+
+export interface Timeline {
+  steps: TimelineStep[];
+  current: TimelineStep;
+  history: { at: string; text: string; adminDetail: string | null }[];
+}
+
 export interface GameRequest {
   id: number;
   userId: number;
@@ -148,6 +168,8 @@ export interface GameRequest {
   availableAt: string | null;
   // The game in RomM, once RomM has it (RomM scans new games within the hour)
   rommId: number | null;
+  // Where it's at, when the list was asked for with the status
+  now?: TimelineStep;
 }
 
 // What the download client is doing for a game RetroArr is fetching
@@ -354,7 +376,8 @@ export const api = {
   logout: () => call<void>('POST', '/auth/logout', {}),
   platforms: () => call<Platform[]>('GET', '/platforms'),
   search: (q: string) => call<{ results: SearchResult[] }>('GET', `/search?q=${encodeURIComponent(q)}`),
-  requests: (scope: 'mine' | 'all') => call<{ requests: GameRequest[] }>('GET', `/requests?scope=${scope}`),
+  requests: (scope: 'mine' | 'all', withStatus = false) => call<{ requests: GameRequest[] }>('GET', `/requests?scope=${scope}${withStatus ? '&withStatus=1' : ''}`),
+  timeline: (id: number) => call<Timeline>('GET', `/requests/${id}/timeline`),
   request: (igdbId: number, platformId: number) => call<{ request: GameRequest }>('POST', '/requests', { igdbId, platformId }),
   approve: (id: number, note?: string) => call<{ request: GameRequest }>('POST', `/requests/${id}/approve`, { note }),
   decline: (id: number, note?: string) => call<{ request: GameRequest }>('POST', `/requests/${id}/decline`, { note }),

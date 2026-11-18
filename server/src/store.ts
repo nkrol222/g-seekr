@@ -17,6 +17,18 @@ export interface User {
   lastLoginAt: string | null;
 }
 
+// What happened to a request: its status changes, a grab, RomM picking it up
+export type RequestEventKind = RequestStatus | 'requested' | 'grabbed' | 'in_romm';
+
+export interface RequestEvent {
+  at: string;
+  kind: RequestEventKind;
+  release: string | null;
+  error: string | null;
+  note: string | null;
+  actor: string | null;
+}
+
 export interface GameRequest {
   id: number;
   userId: number;
@@ -291,7 +303,9 @@ export class Store {
          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
       )
       .run(r.userId, r.igdbId, r.platformId, r.platformName, r.title, r.year, r.coverUrl, now, now);
-    return this.request(Number(res.lastInsertRowid))!;
+    const id = Number(res.lastInsertRowid);
+    this.addRequestEvent(id, 'requested', { actorId: r.userId });
+    return this.request(id)!;
   }
 
   request(id: number): GameRequest | null {
@@ -361,8 +375,48 @@ export class Store {
       sets.push(`${columns[key]} = ?`);
       args.push(value as string | number | null);
     }
+    const before = this.request(id);
     this.db.prepare(`UPDATE requests SET ${sets.join(', ')} WHERE id = ?`).run(...args, id);
-    return this.request(id);
+    const after = this.request(id);
+    // The timeline: every status change, a grab (a new release while downloading), RomM picking it up
+    if (before && after) {
+      if (patch.status !== undefined && patch.status !== before.status) {
+        const decided = patch.status === 'approved' || patch.status === 'declined';
+        this.addRequestEvent(id, patch.status, {
+          release: patch.status === 'downloading' ? after.release : null,
+          error: patch.error ?? null,
+          note: decided ? (patch.note ?? null) : null,
+          actorId: decided ? (patch.decidedBy ?? null) : null,
+        });
+      } else if (patch.release && patch.release !== before.release) {
+        this.addRequestEvent(id, 'grabbed', { release: patch.release });
+      } else if (patch.error && patch.error !== before.error) {
+        this.addRequestEvent(id, after.status, { error: patch.error });
+      }
+      if (patch.rommId && !before.rommId) this.addRequestEvent(id, 'in_romm');
+    }
+    return after;
+  }
+
+  addRequestEvent(requestId: number, kind: RequestEventKind, e: { release?: string | null; error?: string | null; note?: string | null; actorId?: number | null } = {}): void {
+    this.db
+      .prepare('INSERT INTO request_events (request_id, at, kind, release, error, note, actor_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(requestId, this.ts(), kind, e.release ?? null, e.error ?? null, e.note ?? null, e.actorId ?? null);
+  }
+
+  requestEvents(requestId: number): RequestEvent[] {
+    return (
+      this.db
+        .prepare('SELECT e.*, u.username FROM request_events e LEFT JOIN users u ON u.id = e.actor_id WHERE e.request_id = ? ORDER BY e.id')
+        .all(requestId) as Row[]
+    ).map((r) => ({
+      at: String(r.at),
+      kind: String(r.kind) as RequestEventKind,
+      release: r.release == null ? null : String(r.release),
+      error: r.error == null ? null : String(r.error),
+      note: r.note == null ? null : String(r.note),
+      actor: r.username == null ? null : String(r.username),
+    }));
   }
 
   deleteRequest(id: number): void {

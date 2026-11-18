@@ -61,6 +61,9 @@ export class Fakes {
   franchises = new Map<number, { name: string; games: number[] }>([[5, { name: 'Final Fantasy', games: [427, 1020] }]]);
   // Titles IGDB "finds" for POST /discover/match: title → [igdbId, similarity][]
   matches = new Map<string, Array<[number, number]>>();
+  // RetroArr's search log per game, and when it searches next
+  hunts = new Map<number, { lastSearch: Record<string, unknown> | null; nextSearchAt: string | null }>();
+  monitoring = true;
   // RetroArr's RomM sync: the RomM id of each RetroArr game RomM has
   rommIds = new Map<number, number>();
   // Files of Internet Archive items
@@ -154,6 +157,17 @@ export class Fakes {
         return json({ ok: true });
       }
       if (/^\/games\/\d+\/search-now$/.test(path)) return json({ scored: [] });
+      if (path === '/games/search-status') {
+        const ids = url.searchParams.get('ids')!.split(',').map(Number);
+        return json({
+          monitoring: this.monitoring,
+          rssEveryMinutes: 15,
+          searchEveryHours: 6,
+          games: this.games
+            .filter((g) => ids.includes(g.id))
+            .map((g) => ({ gameId: g.id, status: g.status, monitored: g.monitored, ...(this.hunts.get(g.id) ?? { lastSearch: null, nextSearchAt: null }) })),
+        });
+      }
       if (path.startsWith('/discover') && this.igdbDown) return json({ message: 'IGDB didn’t answer; try again in a moment.' }, 503);
       if (path === '/discover/games' && method === 'POST') {
         this.discoverBodies.push(body);

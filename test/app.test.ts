@@ -893,3 +893,79 @@ describe('RomM links', () => {
     expect(built.tasks.status('request-sync')).toMatchObject({ lastOutcome: 'skipped' });
   });
 });
+
+describe('request timeline', () => {
+  it('shows each request’s steps in plain words, with the detail for admins only', async () => {
+    await start();
+    const root = await login('root');
+    const a = await login('alice');
+    const created = (await built.app.inject({ method: 'POST', url: '/api/requests', headers: a.headers, payload: { igdbId: 1020, platformId: 41 } })).json().request;
+    const timeline = async (headers: Record<string, string>) => (await built.app.inject({ url: `/api/requests/${created.id}/timeline`, headers })).json();
+
+    let t = await timeline(a.headers);
+    expect(t.current).toMatchObject({ key: 'approved', state: 'current', detail: 'Waiting for an admin to approve it.' });
+    expect(t.steps.map((s: { key: string; state: string }) => `${s.key}:${s.state}`)).toEqual([
+      'requested:done',
+      'approved:current',
+      'looking:waiting',
+      'downloading:waiting',
+      'library:waiting',
+      'romm:waiting',
+    ]);
+    // Someone else's request isn't theirs to see
+    const b = await login('bob');
+    expect((await built.app.inject({ url: `/api/requests/${created.id}/timeline`, headers: b.headers })).statusCode).toBe(404);
+
+    // Approved and handed to RetroArr; its last search found releases but none good enough
+    await built.app.inject({ method: 'POST', url: `/api/requests/${created.id}/approve`, headers: root.headers, payload: {} });
+    await flush();
+    const game = fakes.games.find((g) => g.igdbId === 1020)!;
+    fakes.hunts.set(game.id, {
+      lastSearch: { at: '2026-11-12T11:00:00Z', outcome: 'NoneGoodEnough', found: 4, rejected: 3, automatic: true, release: 'Chrono Trigger (Hack)', score: 40, reason: 'below auto-download threshold' },
+      nextSearchAt: '2026-11-12T18:00:00Z',
+    });
+    t = await timeline(a.headers);
+    expect(t.current).toMatchObject({ key: 'looking', detail: 'Copies were found, but none good enough yet.', nextAt: '2026-11-12T18:00:00Z', adminDetail: null });
+    const admin = await timeline(root.headers);
+    expect(admin.current.adminDetail).toBe('4 release(s) found, 3 rejected. Best: Chrono Trigger (Hack) (score 40). below auto-download threshold');
+    expect(admin.steps[1].adminDetail).toBe('By root');
+
+    // The list carries each request's current step
+    const list = (await built.app.inject({ url: '/api/requests?withStatus=1', headers: a.headers })).json().requests;
+    expect(list[0].now).toMatchObject({ key: 'looking', detail: 'Copies were found, but none good enough yet.' });
+
+    // Grabbed, then imported, then in RomM
+    built.store.updateRequest(created.id, { status: 'downloading', release: 'Chrono Trigger (USA)' });
+    t = await timeline(a.headers);
+    expect(t.current).toMatchObject({ key: 'downloading', state: 'current', adminDetail: null });
+    built.store.updateRequest(created.id, { status: 'available', availableAt: clock.toISOString() });
+    t = await timeline(a.headers);
+    expect(t.current).toMatchObject({ key: 'romm', state: 'current', detail: 'Being added to RomM, usually within the hour.' });
+    built.store.updateRequest(created.id, { rommId: 9 });
+    t = await timeline(root.headers);
+    expect(t.steps.every((s: { state: string }) => s.state === 'done')).toBe(true);
+    expect(t.history.map((h: { text: string }) => h.text)).toEqual([
+      'Requested',
+      'Approved',
+      'Looking for a copy',
+      'Found a copy; downloading',
+      'Added to the library',
+      'Ready in RomM',
+    ]);
+    expect(t.history[3].adminDetail).toBe('Chrono Trigger (USA)');
+    expect((await timeline(a.headers)).history[3].adminDetail).toBeNull();
+  });
+
+  it('says when a download failed and it’s looking again, and when monitoring is off', async () => {
+    await start();
+    const root = await login('root');
+    const created = (await built.app.inject({ method: 'POST', url: '/api/requests', headers: root.headers, payload: { igdbId: 427, platformId: 50 } })).json().request;
+    await flush();
+    built.store.updateRequest(created.id, { status: 'downloading', release: 'FF7 (USA)' });
+    built.store.updateRequest(created.id, { status: 'searching', error: 'Download stalled for 24 hours' });
+    fakes.monitoring = false;
+    const t = (await built.app.inject({ url: `/api/requests/${created.id}/timeline`, headers: root.headers })).json();
+    expect(t.current.detail).toMatch(/^The last download didn’t work out, so it’s looking for another copy\. Waiting for its first search\./);
+    expect(t.current.adminDetail).toMatch(/Download failed: Download stalled for 24 hours\. RetroArr’s monitoring is off/);
+  });
+});
