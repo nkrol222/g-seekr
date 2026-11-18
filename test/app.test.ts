@@ -969,3 +969,16 @@ describe('request timeline', () => {
     expect(t.current.adminDetail).toMatch(/Download failed: Download stalled for 24 hours\. RetroArr’s monitoring is off/);
   });
 });
+
+describe('collections in progress', () => {
+  it('counts the games already in the library, not only requests', async () => {
+    await start();
+    fakes.catalogue.set(1009, { title: 'Final Fantasy VI', year: 1994, platforms: [41, 50] });
+    fakes.franchises.set(5, { name: 'Final Fantasy', games: [427, 1009] });
+    // Nobody requested anything; the library has Final Fantasy VII
+    fakes.games.push({ id: 1, title: 'Final Fantasy VII', igdbId: 427, platformId: 50, status: 4, monitored: false });
+    const a = await login('alice');
+    const rows = (await built.app.inject({ url: '/api/collections', headers: a.headers })).json();
+    expect(rows.inProgress).toMatchObject([{ kind: 'series', id: 5, name: 'Final Fantasy', total: 2, inLibrary: 1 }]);
+  });
+});

@@ -398,6 +398,17 @@ export class RetroArrClient {
     return map;
   }
 
+  // Every IGDB game the library has; empty from an older RetroArr without the endpoint
+  async ownedIgdbIds(): Promise<number[]> {
+    try {
+      const res = await this.call<{ igdbIds?: unknown[] }>('GET', '/discover/library/owned');
+      return (res.igdbIds ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    } catch (err) {
+      if (err instanceof RetroArrError && err.status === 404) return [];
+      throw err;
+    }
+  }
+
   // What the library has of each game, per platform
   async libraryOf(igdbIds: number[]): Promise<Map<number, RetroArrDiscoverGame['library']>> {
     const map = new Map<number, RetroArrDiscoverGame['library']>();

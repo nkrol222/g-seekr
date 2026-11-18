@@ -69,7 +69,7 @@ export function Discover({ me }: { me: Me }) {
       {collections && (
         <>
           <CollectionRow title="Featured collections" cards={collections.featured} link="#/collections" />
-          <CollectionRow title="Your collections in progress" cards={collections.inProgress} link="#/collections" />
+          <CollectionRow title="Collections in progress" cards={collections.inProgress} link="#/collections" />
         </>
       )}
       {filters && (
