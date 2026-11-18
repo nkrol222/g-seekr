@@ -42,6 +42,16 @@ createServer(async (req, res) => {
     res.writeHead(204).end();
     return;
   }
+  // POST /ra/_hunt/{gameId}/{outcome}: RetroArr's last search for the game came to that (NothingFound, NoneGoodEnough, ...)
+  const h = url.match(/^\/ra\/_hunt\/(\d+)\/(\w+)$/);
+  if (h) {
+    fakes.hunts.set(Number(h[1]), {
+      lastSearch: { at: new Date(Date.now() - 2 * 3600_000).toISOString(), outcome: h[2], found: 5, rejected: 4, automatic: true, release: 'Chrono Trigger (Japan) [T-En by Aeon Genesis]', score: 41, reason: 'below auto-download threshold (translation patch)' },
+      nextSearchAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
+    });
+    res.writeHead(204).end();
+    return;
+  }
   const m = url.match(/^\/ra\/_import\/(\d+)$/);
   if (m) {
     const game = fakes.games.find((g) => g.id === Number(m[1]));

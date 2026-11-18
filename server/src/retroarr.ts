@@ -108,6 +108,30 @@ function toDiscoverGame(g: Record<string, unknown>): RetroArrDiscoverGame {
   };
 }
 
+export type RetroArrSearchOutcome = 'Grabbed' | 'NothingFound' | 'NoneGoodEnough' | 'NotGrabbed' | 'Failed';
+
+export interface RetroArrGameHunt {
+  monitored: boolean;
+  // The next search that includes it; null when it isn't wanted or monitoring is off
+  nextSearchAt: string | null;
+  lastSearch: {
+    at: string;
+    outcome: RetroArrSearchOutcome;
+    found: number;
+    rejected: number;
+    automatic: boolean;
+    release: string | null;
+    score: number | null;
+    reason: string | null;
+  } | null;
+}
+
+export interface RetroArrSearchStatus {
+  monitoring: boolean;
+  rssEveryMinutes: number | null;
+  games: Map<number, RetroArrGameHunt>;
+}
+
 export class RetroArrError extends Error {
   constructor(
     message: string,
@@ -245,6 +269,42 @@ export class RetroArrClient {
       trackedState: typeof d.trackedState === 'string' ? d.trackedState : null,
       statusMessages: Array.isArray(d.statusMessages) ? d.statusMessages.filter((m): m is string => typeof m === 'string').slice(0, 5) : [],
     }));
+  }
+
+  // Where each game stands in the hunt for a release: its last search and when RetroArr searches again. Empty from an
+  // older RetroArr without the endpoint.
+  async searchStatus(gameIds: number[]): Promise<RetroArrSearchStatus> {
+    const empty: RetroArrSearchStatus = { monitoring: true, rssEveryMinutes: null, games: new Map() };
+    if (gameIds.length === 0) return empty;
+    let res: Record<string, unknown>;
+    try {
+      res = await this.call<Record<string, unknown>>('GET', `/games/search-status?ids=${gameIds.slice(0, 500).join(',')}`);
+    } catch (err) {
+      if (err instanceof RetroArrError && err.status === 404) return empty;
+      throw err;
+    }
+    const games = new Map<number, RetroArrGameHunt>();
+    for (const g of Array.isArray(res.games) ? (res.games as Array<Record<string, unknown>>) : []) {
+      const last = g.lastSearch && typeof g.lastSearch === 'object' ? (g.lastSearch as Record<string, unknown>) : null;
+      const text = (v: unknown) => (typeof v === 'string' && v ? v : null);
+      games.set(Number(g.gameId), {
+        monitored: g.monitored === true,
+        nextSearchAt: text(g.nextSearchAt),
+        lastSearch: last
+          ? {
+              at: String(last.at),
+              outcome: String(last.outcome) as RetroArrSearchOutcome,
+              found: Number(last.found ?? 0),
+              rejected: Number(last.rejected ?? 0),
+              automatic: last.automatic === true,
+              release: text(last.release),
+              score: typeof last.score === 'number' ? last.score : null,
+              reason: text(last.reason),
+            }
+          : null,
+      });
+    }
+    return { monitoring: res.monitoring !== false, rssEveryMinutes: typeof res.rssEveryMinutes === 'number' ? res.rssEveryMinutes : null, games };
   }
 
   // Blocklists the game's release and grabs another that qualifies; its import replaces the old one. Can take a while.

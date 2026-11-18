@@ -511,10 +511,17 @@ export async function buildApp(deps: AppDeps) {
     return typeof note === 'string' && note.trim() ? note.trim().slice(0, 500) : undefined;
   };
 
-  app.get<{ Querystring: { scope?: string } }>('/api/requests', async (req) => {
-    const all = req.query.scope === 'all' && requests.isAdmin(req.user!);
-    return { requests: store.listRequests(all ? {} : { userId: req.user!.id }) };
+  // withStatus: each request's current step ("No copy found yet, next look at 6 pm"), for the Requests page
+  app.get<{ Querystring: { scope?: string; withStatus?: string } }>('/api/requests', async (req) => {
+    const admin = requests.isAdmin(req.user!);
+    const all = req.query.scope === 'all' && admin;
+    const list = store.listRequests(all ? {} : { userId: req.user!.id });
+    if (req.query.withStatus !== '1') return { requests: list };
+    const timelines = await requests.timelines(list, admin);
+    return { requests: list.map((r) => ({ ...r, now: timelines.get(r.id)!.current })) };
   });
+
+  app.get<{ Params: { id: string } }>('/api/requests/:id/timeline', async (req) => requests.timeline(req.user!, idParam(req.params.id)));
 
   app.post<{ Body: { igdbId?: unknown; platformId?: unknown } }>('/api/requests', async (req, reply) => {
     const igdbId = Number(req.body?.igdbId);

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, ISSUE_KIND_LABEL, ISSUE_STATUS_LABEL, type GameRequest, type Issue, type Me, type RequestStatus } from '../api';
 import { ProgressBar, ReportDialog, useProgress } from './Live';
 import { ago, Alert, Avatar, Icon, Poster, rommLink, StatusBadge, statusDetail, when } from './shared';
+import { RequestTimeline, StepLine } from './Timeline';
 
 export type Filter = 'all' | 'open' | 'pending' | 'processing' | 'available' | 'failed' | 'declined';
 
@@ -29,11 +30,12 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
   const [notice, setNotice] = useState<string | null>(null);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [reporting, setReporting] = useState<GameRequest | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
   const scope = admin ? 'all' : 'mine';
 
   const load = useCallback(async () => {
     try {
-      const [r, i] = await Promise.all([api.requests(scope), api.issues(scope)]);
+      const [r, i] = await Promise.all([api.requests(scope, true), api.issues(scope)]);
       setRequests(r.requests);
       setIssues(i.issues);
     } catch (err) {
@@ -149,6 +151,14 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
                   <dd>
                     <StatusBadge status={r.status} />
                   </dd>
+                  {r.now && r.now.key !== 'requested' && !(r.now.key === 'romm' && r.now.state === 'done') && (
+                    <>
+                      <dt>Now</dt>
+                      <dd>
+                        <StepLine step={r.now} admin={admin} />
+                      </dd>
+                    </>
+                  )}
                   {live && (
                     <>
                       <dt>{issue?.status === 'replacing' ? 'Replacement' : 'Progress'}</dt>
@@ -167,13 +177,7 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
                       </dd>
                     </>
                   )}
-                  {r.status === 'available' && !r.rommId && (
-                    <>
-                      <dt>RomM</dt>
-                      <dd className="muted">Being added to RomM, usually within the hour. Play in RomM appears here then.</dd>
-                    </>
-                  )}
-                  {detail && !live && (
+                  {admin && detail && !live && (
                     <>
                       <dt>Release</dt>
                       <dd className="release" title={detail}>
@@ -198,8 +202,12 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
                     </>
                   )}
                 </dl>
-                {r.error && <p className="err">{r.error}</p>}
+                {admin && r.error && <p className="err">{r.error}</p>}
                 {r.note && <p className="note">Note: {r.note}</p>}
+                <button type="button" className="link-button" aria-expanded={open === r.id} onClick={() => setOpen(open === r.id ? null : r.id)}>
+                  <Icon name="clock" /> {open === r.id ? 'Hide details' : 'Details'}
+                </button>
+                {open === r.id && <RequestTimeline requestId={r.id} admin={admin} live={live} />}
               </div>
               <div className="side">
                 {admin && r.status === 'pending' && (

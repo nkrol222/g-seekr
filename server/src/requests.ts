@@ -1,6 +1,7 @@
 import type { Config } from './config.js';
 import type { Notifier } from './notify.js';
 import { RetroArrError, type RetroArrClient, type RetroArrGame, type RetroArrPlatform } from './retroarr.js';
+import { buildTimeline, forUser, type Timeline } from './timeline.js';
 import { TRACKED_STATUSES, type GameRequest, type RequestStatus, type Store, type User } from './store.js';
 
 export class RequestError extends Error {
@@ -341,6 +342,32 @@ export class RequestService {
       this.log.warn(`progress: ${(err as Error).message}`);
       return { progress: [], error: 'Download progress isn’t available right now.' };
     }
+  }
+
+  // Each request's timeline, with RetroArr's search status for those it's looking for. RetroArr not answering only
+  // leaves out the search detail.
+  async timelines(list: GameRequest[], admin: boolean): Promise<Map<number, Timeline>> {
+    const hunting = list.filter((r) => r.status === 'searching' && r.retroarrGameId !== null).map((r) => r.retroarrGameId!);
+    let status: Awaited<ReturnType<RetroArrClient['searchStatus']>> | null = null;
+    if (hunting.length > 0) {
+      try {
+        status = await this.retroarr.searchStatus([...new Set(hunting)]);
+      } catch (err) {
+        this.log.warn(`search status: ${(err as Error).message}`);
+      }
+    }
+    const out = new Map<number, Timeline>();
+    for (const r of list) {
+      const t = buildTimeline(r, this.store.requestEvents(r.id), r.retroarrGameId !== null ? status?.games.get(r.retroarrGameId) : undefined, status?.monitoring ?? true);
+      out.set(r.id, admin ? t : forUser(t));
+    }
+    return out;
+  }
+
+  async timeline(user: User, id: number): Promise<Timeline> {
+    const r = this.mustGet(id);
+    if (r.userId !== user.id && !this.isAdmin(user)) throw new RequestError('Request not found.', 404, 'not_found');
+    return (await this.timelines([r], this.isAdmin(user))).get(r.id)!;
   }
 
   // release: what was imported, when the webhook says

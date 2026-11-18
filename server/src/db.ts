@@ -173,6 +173,20 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE requests ADD COLUMN romm_id INTEGER;
   `,
+  // 9: what happened to each request, for its timeline
+  `
+  CREATE TABLE request_events (
+    id INTEGER PRIMARY KEY,
+    request_id INTEGER NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+    at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    release TEXT,
+    error TEXT,
+    note TEXT,
+    actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE INDEX request_events_request ON request_events(request_id, id);
+  `,
 ];
 
 export function openDb(path: string): Db {
