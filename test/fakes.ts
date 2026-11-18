@@ -236,6 +236,9 @@ export class Fakes {
         });
       }
       if (path === '/discover/options') return json({ genres: [{ id: 12, name: 'Role-playing (RPG)' }], themes: [{ id: 42, name: 'Erotic' }], gameModes: [{ id: 1, name: 'Single player' }] });
+      if (path === '/discover/library/owned') {
+        return json({ igdbIds: [...new Set(this.games.filter((g) => g.status === 4).map((g) => g.igdbId))] });
+      }
       if (path === '/discover/library/recent') {
         return json({ games: this.games.filter((g) => g.status === 4).map((g) => this.discoverGame(g.igdbId, this.catalogue.get(g.igdbId)!)) });
       }

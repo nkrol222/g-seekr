@@ -168,7 +168,7 @@ export function Collections({ me }: { me: Me }) {
       {rows && (
         <>
           <CollectionRow title="Featured" cards={rows.featured} />
-          <CollectionRow title="Your collections in progress" cards={rows.inProgress} />
+          <CollectionRow title="Collections in progress" cards={rows.inProgress} />
           <CollectionRow title="Popular collections" cards={rows.popular} />
           <section className="slider">
             <div className="slider-head">

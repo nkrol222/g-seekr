@@ -52,6 +52,7 @@ export interface RequestMissingResult {
 const BATCH = 20;
 const SERIES_OF_FOR = 24 * 60 * 60_000;
 const POPULAR_FOR = 10 * 60_000;
+const OWNED_FOR = 10 * 60_000;
 const CONFIDENT = 0.9;
 const POSSIBLE = 0.5;
 const MAX_IMPORT = 5000;
@@ -201,12 +202,29 @@ export class CollectionService {
   }
 
   // Series of the games this user requested or liked, where the library has some but not all
+  // Collections in progress: series the library has some but not all of. Started from the games already in the
+  // library as well as the user's requests and likes; the series the user requested or liked come first.
   async inProgress(user: User): Promise<CollectionCard[]> {
-    const mine = [...this.store.listRequests({ userId: user.id }).map((r) => r.igdbId), ...this.store.likes(user.id).map((l) => l.igdbId)];
-    const counts = await this.seriesCounts(mine);
-    const top = [...counts.entries()].sort((a, b) => b[1].games.size - a[1].games.size).slice(0, 8);
-    const cards = await Promise.all(top.map(([id]) => this.seriesCard(user, id).catch(() => null)));
-    return cards.filter((c): c is CollectionCard => c !== null && c.inLibrary > 0 && c.inLibrary < c.total).slice(0, 6);
+    const mine = new Set([...this.store.listRequests({ userId: user.id }).map((r) => r.igdbId), ...this.store.likes(user.id).map((l) => l.igdbId)]);
+    const owned = await this.ownedIgdbIds();
+    const counts = await this.seriesCounts([...mine, ...owned]);
+    const ownedSet = new Set(owned);
+    const rank = [...counts.entries()]
+      .map(([id, c]) => ({ id, touched: [...c.games].some((g) => mine.has(g)), owned: [...c.games].filter((g) => ownedSet.has(g)).length }))
+      .sort((a, b) => Number(b.touched) - Number(a.touched) || b.owned - a.owned)
+      .slice(0, 16);
+    const cards = await Promise.all(rank.map(({ id }) => this.seriesCard(user, id).catch(() => null)));
+    return cards.filter((c): c is CollectionCard => c !== null && c.inLibrary > 0 && c.inLibrary < c.total).slice(0, 10);
+  }
+
+  // The library's games, asked of RetroArr at most every 10 minutes
+  private ownedCache: { at: number; ids: number[] } | null = null;
+  private async ownedIgdbIds(): Promise<number[]> {
+    const now = this.now().getTime();
+    if (this.ownedCache && now - this.ownedCache.at < OWNED_FOR) return this.ownedCache.ids;
+    const ids = await this.retroarr.ownedIgdbIds().catch(() => this.ownedCache?.ids ?? []);
+    this.ownedCache = { at: now, ids };
+    return ids;
   }
 
   async allLists(): Promise<CollectionCard[]> {
