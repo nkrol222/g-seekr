@@ -11,9 +11,10 @@ import { AdminTasks } from './pages/AdminTasks';
 import { Issues } from './pages/Issues';
 import { Collections, CollectionView } from './pages/Collections';
 import { ImportReview, ImportStart } from './pages/Imports';
+import { RomHacks } from './pages/RomHacks';
 import { Avatar, Icon, Mark, type IconName } from './pages/shared';
 
-type View = 'discover' | 'for-you' | 'browse' | 'search' | 'game' | 'collections' | 'collection' | 'import' | 'import-review' | 'requests' | 'issues' | 'users' | 'tasks';
+type View = 'discover' | 'for-you' | 'romhacks' | 'browse' | 'search' | 'game' | 'collections' | 'collection' | 'import' | 'import-review' | 'requests' | 'issues' | 'users' | 'tasks';
 
 interface Route {
   view: View;
@@ -43,7 +44,7 @@ const parseHash = (): Route => {
     if (imp[1]) params.set('id', imp[1]);
     return { view: imp[1] ? 'import-review' : 'import', params };
   }
-  const view = (['for-you', 'browse', 'search', 'collections', 'requests', 'issues', 'users', 'tasks'] as const).find((v) => v === path) ?? 'discover';
+  const view = (['for-you', 'romhacks', 'browse', 'search', 'collections', 'requests', 'issues', 'users', 'tasks'] as const).find((v) => v === path) ?? 'discover';
   // #/mine and #/queue were the old requests pages
   return { view: path === 'mine' || path === 'queue' ? 'requests' : view, params };
 };
@@ -98,6 +99,7 @@ export function App() {
         />
       )}
       {view === 'for-you' && <ForYou />}
+      {view === 'romhacks' && <RomHacks key={route.params.toString()} platformParam={num('platform')} kindParam={route.params.get('kind')} />}
       {view === 'collections' && <Collections me={me} />}
       {view === 'collection' && (
         <CollectionView
@@ -163,6 +165,7 @@ function Shell({
     { id: 'for-you', label: 'For you', icon: 'heart', href: '#/for-you' },
     { id: 'browse', label: 'Browse', icon: 'squares', href: '#/browse' },
     { id: 'collections', label: 'Collections', icon: 'stack', href: '#/collections' },
+    { id: 'romhacks', label: 'ROM hacks', icon: 'wrench', href: '#/romhacks' },
     { id: 'requests', label: me.user.isAdmin ? 'Requests' : 'My requests', icon: 'clock', href: '#/requests', count: me.user.isAdmin ? pending : 0 },
     { id: 'issues', label: me.user.isAdmin ? 'Issues' : 'My problems', icon: 'flag', href: '#/issues', count: me.user.isAdmin ? openIssues : 0 },
     ...(me.user.isAdmin

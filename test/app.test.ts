@@ -300,6 +300,64 @@ describe('requests', () => {
     expect(fakes.discord.map((d) => d.content)).toContainEqual(expect.stringContaining('Expansion Pass of **Breath of the Wild** (2017) for Nintendo Switch is ready to play'));
   });
 
+  it('lists ROM hacks of a game, requests one, and follows RetroArr until it is patched', async () => {
+    fakes.romHacks = [
+      { id: 'chrono-plus', title: 'Chrono Trigger+', baseTitle: 'Chrono Trigger', baseIgdbId: 1020, platformId: 41, kind: 'improvement', authors: ['someone'], year: 2020, summary: 'Better.', hackStatus: null, baseStatus: null },
+      { id: 'ff7-hard', title: 'FF7 Hardcore', baseTitle: 'Final Fantasy VII', baseIgdbId: 427, platformId: 50, kind: 'difficulty', authors: [], hackStatus: 'Downloaded', hackError: 'secret', baseStatus: 'Downloaded' },
+      { id: 'off-platform', title: 'Off', baseTitle: 'Off', baseIgdbId: 1, platformId: 60, kind: 'story', authors: [] },
+    ];
+    await start();
+    const alice = await login('alice');
+    const root = await login('root');
+
+    const forGame = await built.app.inject({ url: '/api/romhacks?igdbId=1020', headers: alice.headers });
+    expect(forGame.json().hacks.map((h: { id: string }) => h.id)).toEqual(['chrono-plus']);
+    const all = (await built.app.inject({ url: '/api/romhacks', headers: alice.headers })).json().hacks;
+    // the disabled platform's hack isn't offered; one patched already is available; errors are for admins
+    expect(all.map((h: { id: string; status: string | null }) => [h.id, h.status])).toEqual([['chrono-plus', null], ['ff7-hard', 'available']]);
+    expect(all[1]).not.toHaveProperty('error');
+    expect((await built.app.inject({ url: '/api/romhacks?kind=difficulty', headers: root.headers })).json().hacks).toMatchObject([{ id: 'ff7-hard', error: 'secret' }]);
+
+    const post = (h: Record<string, string>, hackId: string) => built.app.inject({ method: 'POST', url: '/api/requests', headers: h, payload: { kind: 'hack', hackId } });
+    expect((await post(alice.headers, 'nope')).statusCode).toBe(404);
+    expect((await post(alice.headers, 'ff7-hard')).json().code).toBe('in_library');
+    const created = await post(alice.headers, 'chrono-plus');
+    expect(created.statusCode).toBe(201);
+    expect(created.json().request).toMatchObject({ kind: 'hack', variant: 'hack:chrono-plus', title: 'Chrono Trigger+', igdbId: 1020, status: 'pending' });
+    expect((await post(alice.headers, 'chrono-plus')).json().code).toBe('already_requested');
+    // a ROM hack request doesn't stand in the way of requesting the game itself
+    expect((await built.app.inject({ method: 'POST', url: '/api/requests', headers: alice.headers, payload: { igdbId: 1020, platformId: 41 } })).statusCode).toBe(201);
+
+    const id = created.json().request.id;
+    const approved = await built.app.inject({ method: 'POST', url: `/api/requests/${id}/approve`, headers: root.headers, payload: {} });
+    expect(approved.json().request).toMatchObject({ status: 'searching', retroarrGameId: 100 });
+    expect(fakes.calls).toContain('POST /romhacks/chrono-plus/request');
+    expect((await built.app.inject({ url: '/api/romhacks?igdbId=1020', headers: alice.headers })).json().hacks[0]).toMatchObject({ status: 'searching', requestId: id });
+
+    await built.requests.poll();
+    expect(built.store.request(id)!.status).toBe('searching');
+    fakes.games.find((g) => g.id === 100)!.status = 4;
+    await built.requests.poll();
+    expect(built.store.request(id)!.status).toBe('available');
+  });
+
+  it('survives a RetroArr without the catalogue, and recommends ROM hacks of games the user liked', async () => {
+    fakes.romHacks = [{ id: 'chrono-plus', title: 'Chrono Trigger+', baseTitle: 'Chrono Trigger', baseIgdbId: 1020, platformId: 41, kind: 'improvement', authors: [] }];
+    await start();
+    const alice = await login('alice');
+    // RetroArr without the catalogue (or down): no hacks, no error page
+    fakes.romHacksDown = true;
+    const down = await built.app.inject({ url: '/api/romhacks?platform=41', headers: alice.headers });
+    expect(down.statusCode).toBe(200);
+    expect(down.json()).toMatchObject({ hacks: [], error: expect.stringContaining('couldn’t be read') });
+    fakes.romHacksDown = false;
+
+    expect((await built.app.inject({ url: '/api/recommendations', headers: alice.headers })).json().hacks).toEqual([]);
+    await built.app.inject({ method: 'PUT', url: '/api/games/1020/like', headers: alice.headers, payload: { liked: true, title: 'Chrono Trigger' } });
+    const recs = (await built.app.inject({ url: '/api/recommendations', headers: alice.headers })).json();
+    expect(recs.hacks).toMatchObject([{ id: 'chrono-plus', reasons: [{ kind: 'liked', igdbId: 1020 }] }]);
+  });
+
   it('approves admins and auto-approve users at once, and reuses a game RetroArr already has', async () => {
     await start();
     fakes.games.push({ id: 7, title: 'Final Fantasy VII', igdbId: 427, platformId: 50, status: 2, monitored: false });

@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { api, REASON_VERB, type Recommendations, type Recommended, type RommStatus } from '../api';
+import { api, REASON_VERB, type Reason, type Recommendations, type Recommended, type RommStatus } from '../api';
 import { FilterButton, FilterPanel, useFilters } from './Filters';
 import { Alert, Icon } from './shared';
 import { TitleCard } from './Titles';
+import { HackList } from './RomHacks';
+
+// "Because you played Super Metroid"
+export const reasonOf = (r: Reason) => `because you ${REASON_VERB[r.kind]} ${r.title}`;
 
 // "Because you played Chrono Trigger" (and liked, and requested), the first one or two reasons
 export function reasonText(r: Recommended): string {
@@ -85,6 +89,15 @@ export function ForYou() {
             <TitleCard key={g.igdbId} game={g} reason={reasonText(g)} onDismiss={() => void dismiss(g.igdbId)} />
           ))}
         </div>
+      )}
+      {recs?.hacks && recs.hacks.length > 0 && (
+        <section>
+          <h2>ROM hacks of games you played</h2>
+          <HackList hacks={recs.hacks} />
+          <p className="muted small">
+            <a href="#/romhacks">Every ROM hack</a>
+          </p>
+        </section>
       )}
       {panel && filters && (
         <FilterPanel

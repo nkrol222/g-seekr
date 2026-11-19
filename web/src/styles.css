@@ -2468,3 +2468,47 @@ table.table {
   overflow-y: auto;
   padding-left: 1.4rem;
 }
+
+/* ROM hacks */
+.hack-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+}
+.hack {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hack p {
+  margin: 0;
+}
+.hack-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.hack .badge.kind {
+  margin-left: auto;
+}
+.hack-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.filters-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 16px;
+}
+.error-text {
+  color: var(--danger, #f38ba8);
+}
