@@ -93,6 +93,18 @@ their defaults. `JELLYFIN_URL`, `RETROARR_URL` and `RETROARR_TOKEN` are required
 To create the RetroArr token: RetroArr → **Settings → API access → Tokens for other apps**.
 Name it `g-seekr`, tick only `requests`, and copy the `rat_…` value. It's shown once.
 
+### IGDB
+
+Discover, Browse, game pages, series and list imports come from IGDB. With `IGDB_CLIENT_ID` and
+`IGDB_CLIENT_SECRET` set, g-seekr asks IGDB itself, with its own Twitch app. That app gets its own
+4 requests a second, separate from RetroArr's, and g-seekr keeps the answers six hours in its
+database, so they survive a restart. What the library has of each game still comes from RetroArr, in
+one call per page. Without them, it all goes through RetroArr, as before.
+
+To create the app: [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps) → **Register
+Your Application**: any name, OAuth redirect `http://localhost`, category **Application
+Integration**, client type **Confidential**. Copy the client ID, then press **New Secret**.
+
 ### Recommendations and RomM
 
 The **For you** page and Discover's "Recommended for you" and "Because you …" rows come from

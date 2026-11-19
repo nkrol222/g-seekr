@@ -187,6 +187,15 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX request_events_request ON request_events(request_id, id);
   `,
+  // 10: IGDB's answers, kept six hours (lists, game pages, series) when g-seekr asks IGDB itself
+  `
+  CREATE TABLE igdb_cache (
+    key TEXT PRIMARY KEY,
+    at INTEGER NOT NULL,
+    value TEXT NOT NULL
+  );
+  CREATE INDEX igdb_cache_at ON igdb_cache(at);
+  `,
 ];
 
 export function openDb(path: string): Db {
