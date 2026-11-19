@@ -1,3 +1,4 @@
+import { DirectIgdbRetroArrClient, IgdbError } from './igdb.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -106,7 +107,7 @@ export async function buildApp(deps: AppDeps) {
       {
         key: 'housekeeping',
         name: 'Housekeeping',
-        description: 'Deletes expired sign-ins, and list imports saved more than 30 days ago (their games stay in the list).',
+        description: 'Deletes expired sign-ins, list imports saved more than 30 days ago (their games stay in the list), and IGDB answers kept over a week.',
         defaultSeconds: 24 * 3600,
         minSeconds: 3600,
         maxSeconds: 7 * 24 * 3600,
@@ -116,7 +117,8 @@ export async function buildApp(deps: AppDeps) {
           store.pruneSessions();
           const now = deps.now?.() ?? new Date();
           const imports = collections.lists.pruneSavedImports(new Date(now.getTime() - 30 * 86_400_000));
-          return `${imports} old import(s) removed`;
+          const igdb = deps.retroarr instanceof DirectIgdbRetroArrClient ? deps.retroarr.igdbApi.prune() : 0;
+          return `${imports} old import(s) removed${igdb ? `, ${igdb} old IGDB answer(s)` : ''}`;
         },
       },
     ],
@@ -169,6 +171,11 @@ export async function buildApp(deps: AppDeps) {
     // RetroArr couldn't ask IGDB (not set up, or not answering): say so plainly
     if (err instanceof RetroArrError && err.status === 503) {
       return reply.code(503).send({ error: err.message.replace(/^RetroArr answered 503: /, '') });
+    }
+    // g-seekr's own IGDB app: not answering, or its credentials refused
+    if (err instanceof IgdbError) {
+      req.log.warn(err.message);
+      return reply.code(503).send({ error: `IGDB isn't answering just now: ${err.message}` });
     }
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });

@@ -6,6 +6,8 @@ export interface RetroArrPlatform {
   slug: string;
   category: string | null;
   enabled: boolean;
+  // IGDB's id for the platform (g-seekr asks IGDB itself)
+  igdbPlatformId?: number | null;
 }
 
 export interface RetroArrLookupGame {
@@ -218,6 +220,7 @@ export class RetroArrClient {
       slug: String(p.slug ?? '').toLowerCase(),
       category: typeof p.category === 'string' ? p.category : null,
       enabled: p.enabled !== false,
+      igdbPlatformId: typeof p.igdbPlatformId === 'number' ? p.igdbPlatformId : null,
     }));
   }
 

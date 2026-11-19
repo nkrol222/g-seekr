@@ -16,6 +16,10 @@ export interface Config {
   // Null = users can't link RomM, and recommendations use requests and likes only.
   rommApiUrl: string | null;
   discordWebhookUrl: string | null;
+  // g-seekr's own Twitch app for IGDB (dev.twitch.tv). Both set: lists, game pages and series come from IGDB
+  // directly; neither: through RetroArr, as before.
+  igdbClientId: string | null;
+  igdbClientSecret: string | null;
   // The app's own public origin (https://games.example.com). When set, state-changing requests
   // from any other Origin are refused.
   publicUrl: string | null;
@@ -93,6 +97,8 @@ export function loadConfig(env: Env = process.env): Config {
     rommUrl: url('ROMM_URL', false),
     rommApiUrl: url('ROMM_API_URL', false),
     discordWebhookUrl: url('DISCORD_WEBHOOK_URL', false),
+    igdbClientId: optional('IGDB_CLIENT_ID'),
+    igdbClientSecret: optional('IGDB_CLIENT_SECRET'),
     publicUrl: url('PUBLIC_URL', false),
     secureCookies: bool('SECURE_COOKIES', true),
     trustProxy: trustProxy(),
@@ -108,6 +114,9 @@ export function loadConfig(env: Env = process.env): Config {
   }
   if (config.retroarrWebhookToken && config.retroarrWebhookToken.length < 24) {
     problems.push('RETROARR_WEBHOOK_TOKEN must be at least 24 characters (openssl rand -hex 32)');
+  }
+  if (!config.igdbClientId !== !config.igdbClientSecret) {
+    problems.push('IGDB_CLIENT_ID and IGDB_CLIENT_SECRET go together: set both, or neither');
   }
   if (problems.length > 0) throw new Error(`Invalid configuration:\n  - ${problems.join('\n  - ')}`);
   return config;
