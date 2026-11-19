@@ -48,8 +48,10 @@ export interface DiscoverCard {
   // The platforms the library has it on, and where it can be played: the game in RomM per platform
   inLibrary: number[];
   romm: { platformId: number; rommId: number }[];
+  // Which versions the library has, per platform (region, translation, revision)
+  versions: { platformId: number; region: string; variant: string; revision: string | null; downloaded: boolean }[];
   platformIds: number[];
-  requests: { id: number; platformId: number; status: RequestStatus }[];
+  requests: { id: number; platformId: number; status: RequestStatus; region: string; variant: string }[];
 }
 
 const ids = (v: unknown, max = 50): number[] =>
@@ -194,8 +196,11 @@ export class DiscoverService {
       owned: g.library.some((l) => l.status === 'Downloaded'),
       inLibrary: g.library.filter((l) => l.status === 'Downloaded').map((l) => l.platformId),
       romm: g.library.filter((l) => l.rommId !== null).map((l) => ({ platformId: l.platformId, rommId: l.rommId! })),
+      versions: g.library.map((l) => ({ platformId: l.platformId, region: l.region, variant: l.variant, revision: l.revision, downloaded: l.status === 'Downloaded' })),
       platformIds: g.platformIds.filter((id) => requestable.has(id)),
-      requests: open.filter((r) => r.igdbId === g.igdbId).map((r) => ({ id: r.id, platformId: r.platformId, status: r.status })),
+      requests: open
+        .filter((r) => r.igdbId === g.igdbId)
+        .map((r) => ({ id: r.id, platformId: r.platformId, status: r.status, region: r.region, variant: r.variant })),
     }));
   }
 }

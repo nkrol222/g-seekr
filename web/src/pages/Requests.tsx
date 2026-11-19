@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ISSUE_KIND_LABEL, ISSUE_STATUS_LABEL, type GameRequest, type Issue, type Me, type RequestStatus } from '../api';
+import { api, ISSUE_KIND_LABEL, ISSUE_STATUS_LABEL, type GameRequest, type Issue, type Me, type RequestStatus, versionLabel } from '../api';
 import { ProgressBar, ReportDialog, useProgress } from './Live';
 import { ago, Alert, Avatar, Icon, Poster, rommLink, StatusBadge, statusDetail, when } from './shared';
 import { RequestTimeline, StepLine } from './Timeline';
@@ -144,6 +144,7 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
               <div className="main-col">
                 <span className="meta">
                   {r.year ?? ''} {r.year ? '·' : ''} {r.platformName}
+                  {versionLabel(r) && <span className="version-tag"> · {versionLabel(r)}</span>}
                 </span>
                 <h3>{r.title}</h3>
                 <dl className="facts">

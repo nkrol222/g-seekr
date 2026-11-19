@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, STATUS_LABEL, type GamePage as Page, type Platform, type RequestStatus } from '../api';
+import { api, REGIONS, STATUS_LABEL, versionLabel, type GamePage as Page, type Platform, type RequestStatus, type Version } from '../api';
 import { Alert, Icon, Poster, rommGameUrl, StatusBadge } from './shared';
 import { cardStatus, TitleCard } from './Titles';
 
@@ -10,6 +10,9 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<number | null>(null);
+  // The platform whose "Another version" picker is open, and what's picked in it
+  const [picking, setPicking] = useState<number | null>(null);
+  const [picked, setPicked] = useState<Version>({ region: '', variant: '', latestRevision: false });
   const [showStory, setShowStory] = useState(false);
   const [trailer, setTrailer] = useState<string | null>(null);
   const [mine, setMine] = useState<{ liked: boolean; dismissed: boolean }>({ liked: false, dismissed: false });
@@ -38,15 +41,20 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
     };
   }, [igdbId]);
 
-  const request = async (platformId: number) => {
+  const request = async (platformId: number, version?: Version) => {
     if (!page) return;
     setPending(platformId);
     setError(null);
     setNotice(null);
     try {
-      const { request } = await api.request(igdbId, platformId);
-      setNotice(`Requested for ${request.platformName}: ${STATUS_LABEL[request.status]}.`);
-      setPage({ ...page, game: { ...page.game, requests: [...page.game.requests, { id: request.id, platformId, status: request.status }] } });
+      const { request } = await api.request(igdbId, platformId, version);
+      const which = versionLabel(request);
+      setNotice(`Requested for ${request.platformName}${which ? ` (${which})` : ''}: ${STATUS_LABEL[request.status]}.`);
+      setPage({
+        ...page,
+        game: { ...page.game, requests: [...page.game.requests, { id: request.id, platformId, status: request.status, region: request.region ?? '', variant: request.variant ?? '' }] },
+      });
+      setPicking(null);
       onRequested();
     } catch (err) {
       setError((err as Error).message);
@@ -92,7 +100,15 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
         : page.franchises.join(', '),
     ],
   ];
-  const statusFor = (platformId: number): RequestStatus | null => g.requests.find((r) => r.platformId === platformId)?.status ?? null;
+  const isDefault = (r: { region?: string; variant?: string }) => !r.region && !r.variant;
+  // The default version's request; other versions' requests are listed under it
+  const statusFor = (platformId: number): RequestStatus | null => g.requests.find((r) => r.platformId === platformId && isDefault(r))?.status ?? null;
+  // Where IGDB says it came out on the platform; every region when it doesn't say
+  const regionsFor = (platformId: number) => {
+    const known = page.releases.find((r) => r.platformId === platformId)?.regions ?? [];
+    return known.length > 0 ? REGIONS.filter((r) => known.includes(r)) : REGIONS;
+  };
+  const owns = (platformId: number) => (g.versions ?? []).filter((v) => v.platformId === platformId && v.downloaded);
 
   return (
     <article className="game-page">
@@ -161,24 +177,92 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
                   const s = statusFor(pid);
                   const play = rommGameUrl(rommUrl, g.romm?.find((x) => x.platformId === pid)?.rommId);
                   const owned = g.inLibrary?.includes(pid) ?? false;
+                  const have = owns(pid);
+                  const others = g.requests.filter((r) => r.platformId === pid && !isDefault(r));
+                  const regions = regionsFor(pid);
                   return (
-                    <div key={pid} className="platform-row">
-                      <span className="name">{platform.name}</span>
-                      {play ? (
-                        <a className="btn primary sm" href={play} target="_blank" rel="noreferrer">
-                          <Icon name="play" /> Play in RomM
-                        </a>
-                      ) : owned ? (
-                        <span className="badge available" title="RomM shows it after its next scan, usually within the hour">
-                          In the library
-                        </span>
-                      ) : s ? (
-                        <StatusBadge status={s} />
-                      ) : (
-                        <button type="button" className="btn primary sm" onClick={() => request(pid)} disabled={pending !== null}>
-                          <Icon name="download" />
-                          {pending === pid ? 'Requesting…' : 'Request'}
+                    <div key={pid} className="platform-block">
+                      <div className="platform-row">
+                        <span className="name">{platform.name}</span>
+                        {play ? (
+                          <a className="btn primary sm" href={play} target="_blank" rel="noreferrer">
+                            <Icon name="play" /> Play in RomM
+                          </a>
+                        ) : owned ? (
+                          <span className="badge available" title="RomM shows it after its next scan, usually within the hour">
+                            In the library
+                          </span>
+                        ) : s ? (
+                          <StatusBadge status={s} />
+                        ) : (
+                          <button type="button" className="btn primary sm" onClick={() => request(pid)} disabled={pending !== null}>
+                            <Icon name="download" />
+                            {pending === pid ? 'Requesting…' : 'Request'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn ghost sm"
+                          aria-expanded={picking === pid}
+                          onClick={() => {
+                            setPicking(picking === pid ? null : pid);
+                            setPicked({ region: '', variant: '', latestRevision: false });
+                          }}
+                        >
+                          {picking === pid ? 'Close' : have.length > 0 || s ? 'Another version…' : 'Choose a version…'}
                         </button>
+                      </div>
+                      {have.length > 0 && (
+                        <p className="versions muted">
+                          You have:{' '}
+                          {have
+                            .map((v) => [v.region || 'any region', v.variant === 'en-translation' ? 'English translation' : '', v.revision ? `rev ${v.revision}` : ''].filter(Boolean).join(', '))
+                            .join('; ')}
+                        </p>
+                      )}
+                      {others.map((r) => (
+                        <p key={r.id} className="versions">
+                          {versionLabel(r)}: <StatusBadge status={r.status} />
+                        </p>
+                      ))}
+                      {picking === pid && (
+                        <form
+                          className="version-picker"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            void request(pid, picked);
+                          }}
+                        >
+                          <label>
+                            Region
+                            <select value={picked.region} onChange={(e) => setPicked({ ...picked, region: e.target.value })}>
+                              <option value="">Any (the preferred region first)</option>
+                              {regions.map((r) => (
+                                <option key={r} value={r}>
+                                  {r}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="check">
+                            <input
+                              type="checkbox"
+                              checked={picked.variant === 'en-translation'}
+                              onChange={(e) => setPicked({ ...picked, variant: e.target.checked ? 'en-translation' : '' })}
+                            />
+                            English fan translation
+                          </label>
+                          <label className="check">
+                            <input type="checkbox" checked={picked.latestRevision} onChange={(e) => setPicked({ ...picked, latestRevision: e.target.checked })} />
+                            Latest revision (and update to newer ones)
+                          </label>
+                          <p className="muted small">
+                            {have.length > 0 ? 'A different version is added beside the one you have.' : 'Leave it all as it is for the usual version.'}
+                          </p>
+                          <button type="submit" className="btn primary sm" disabled={pending !== null}>
+                            {pending === pid ? 'Requesting…' : versionLabel(picked) ? `Request ${versionLabel(picked)}` : 'Request'}
+                          </button>
+                        </form>
                       )}
                     </div>
                   );

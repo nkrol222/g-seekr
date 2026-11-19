@@ -29,6 +29,33 @@ export interface RetroArrGame {
   title: string;
   status: RetroArrGameStatus;
   monitored: boolean;
+  // Which version the entry is (RetroArr's Region and Variant)
+  region: string;
+  variant: string;
+}
+
+// What the library has of a game on a platform, and which version it is
+export interface LibraryEntry {
+  gameId: number;
+  platformId: number;
+  status: RetroArrGameStatus;
+  rommId: number | null;
+  region: string;
+  variant: string;
+  revision: string | null;
+}
+
+function toLibraryEntry(l: unknown): LibraryEntry {
+  const o = l as Record<string, unknown>;
+  return {
+    gameId: Number(o.gameId),
+    platformId: Number(o.platformId),
+    status: gameStatus(o.status),
+    rommId: o.rommId == null ? null : Number(o.rommId),
+    region: typeof o.region === 'string' ? o.region : '',
+    variant: typeof o.variant === 'string' ? o.variant : '',
+    revision: typeof o.revision === 'string' && o.revision ? o.revision : null,
+  };
 }
 
 export interface RetroArrProgress {
@@ -67,7 +94,7 @@ export interface RetroArrDiscoverGame {
   platformIds: number[];
   // What RetroArr's library has of it, per platform
   // rommId: the game in RomM, once RetroArr's RomM sync has seen it there
-  library: { gameId: number; platformId: number; status: RetroArrGameStatus; rommId: number | null }[];
+  library: LibraryEntry[];
 }
 
 export interface RetroArrDiscoverDetail {
@@ -81,7 +108,8 @@ export interface RetroArrDiscoverDetail {
   developers: string[];
   publishers: string[];
   franchises: string[];
-  releases: { platform: string; platformId: number | null; date: string | null }[];
+  // regions: where it came out on that platform (from IGDB directly; empty through RetroArr)
+  releases: { platform: string; platformId: number | null; date: string | null; regions?: string[] }[];
   similar: RetroArrDiscoverGame[];
   // Other games of its series, and its main developer's other games (empty from an older RetroArr)
   series: RetroArrDiscoverGame[];
@@ -103,10 +131,7 @@ function toDiscoverGame(g: Record<string, unknown>): RetroArrDiscoverGame {
     ratingCount: typeof g.ratingCount === 'number' ? g.ratingCount : null,
     genres: Array.isArray(g.genres) ? g.genres.filter((x): x is string => typeof x === 'string') : [],
     platformIds: nums(g.platformIds),
-    library: (Array.isArray(g.library) ? g.library : []).map((l) => {
-      const o = l as Record<string, unknown>;
-      return { gameId: Number(o.gameId), platformId: Number(o.platformId), status: gameStatus(o.status), rommId: o.rommId == null ? null : Number(o.rommId) };
-    }),
+    library: (Array.isArray(g.library) ? g.library : []).map(toLibraryEntry),
   };
 }
 
@@ -167,7 +192,14 @@ function toLookupGame(g: Record<string, unknown>): RetroArrLookupGame {
 }
 
 function toGame(g: Record<string, unknown>): RetroArrGame {
-  return { id: Number(g.id), title: String(g.title ?? ''), status: gameStatus(g.status), monitored: g.monitored === true };
+  return {
+    id: Number(g.id),
+    title: String(g.title ?? ''),
+    status: gameStatus(g.status),
+    monitored: g.monitored === true,
+    region: typeof g.region === 'string' ? g.region : '',
+    variant: typeof g.variant === 'string' ? g.variant : '',
+  };
 }
 
 export class RetroArrClient {
@@ -420,10 +452,7 @@ export class RetroArrClient {
       for (const g of res.games ?? []) {
         map.set(
           Number(g.igdbId),
-          (g.library ?? []).map((l) => {
-            const o = l as Record<string, unknown>;
-            return { gameId: Number(o.gameId), platformId: Number(o.platformId), status: gameStatus(o.status), rommId: o.rommId == null ? null : Number(o.rommId) };
-          }),
+          (g.library ?? []).map(toLibraryEntry),
         );
       }
     }

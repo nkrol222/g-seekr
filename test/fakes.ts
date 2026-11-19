@@ -14,6 +14,8 @@ export interface FakeGame {
   platformId: number;
   status: number; // RetroArr's enum: 3 Downloading, 4 Downloaded
   monitored: boolean;
+  region?: string;
+  variant?: string;
 }
 
 export class Fakes {
@@ -141,7 +143,7 @@ export class Fakes {
       if (path === '/game' && method === 'POST') {
         if (this.failAdd) return json({ message: this.failAdd }, 409);
         this.addedBodies.push(body);
-        const game: FakeGame = { id: this.nextGameId++, title: body.title, igdbId: body.igdbId, platformId: body.platformId, status: 0, monitored: body.monitored };
+        const game: FakeGame = { id: this.nextGameId++, title: body.title, igdbId: body.igdbId, platformId: body.platformId, status: 0, monitored: body.monitored, region: body.region ?? '', variant: body.variant ?? '' };
         this.games.push(game);
         return json(game, 201);
       }
@@ -223,7 +225,7 @@ export class Fakes {
         return json({
           games: (body.igdbIds as number[]).map((igdbId) => ({
             igdbId,
-            library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status, rommId: this.rommIds.get(x.id) ?? null })),
+            library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status, rommId: this.rommIds.get(x.id) ?? null, region: x.region ?? '', variant: x.variant ?? '' })),
           })),
         });
       }
@@ -268,7 +270,7 @@ export class Fakes {
       ratingCount: 100,
       genres: ['Role-playing (RPG)'],
       platformIds: g.platforms,
-      library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status, rommId: this.rommIds.get(x.id) ?? null })),
+      library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status, rommId: this.rommIds.get(x.id) ?? null, region: x.region ?? '', variant: x.variant ?? '' })),
     };
   }
 
