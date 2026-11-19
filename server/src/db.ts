@@ -219,6 +219,11 @@ const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX ux_requests_addons_open ON requests(igdb_id, platform_id, region, variant)
     WHERE kind = 'addons' AND status IN ('pending', 'approved', 'searching', 'downloading');
   `,
+  // 13: ROM hacks: a request of kind 'hack' names the hack in variant ('hack:<id>'); one open request per hack
+  `
+  CREATE UNIQUE INDEX ux_requests_hack_open ON requests(variant)
+    WHERE kind = 'hack' AND status IN ('pending', 'approved', 'searching', 'downloading');
+  `,
 ];
 
 export function openDb(path: string): Db {

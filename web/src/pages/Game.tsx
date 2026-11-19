@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { addOnsLabel, api, NO_ADDONS, REGIONS, STATUS_LABEL, versionLabel, type AddOns, type Dlc, type GamePage as Page, type Platform, type RequestStatus, type Version } from '../api';
+import { addOnsLabel, api, NO_ADDONS, type RomHack, REGIONS, STATUS_LABEL, versionLabel, type AddOns, type Dlc, type GamePage as Page, type Platform, type RequestStatus, type Version } from '../api';
 import { Alert, Icon, Poster, rommGameUrl, StatusBadge } from './shared';
 import { cardStatus, TitleCard } from './Titles';
+import { HackList } from './RomHacks';
 
 // Seerr's title page: a backdrop, the poster and facts, the request per platform, then media and similar games
 export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rommUrl: string | null; onRequested: () => void }) {
@@ -16,6 +17,11 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
   // Updates and DLC picked in the version picker, or for a game the library has (addOnsFor: that platform's form)
   const [wanted, setWanted] = useState<AddOns>({ ...NO_ADDONS, latestUpdate: true });
   const [addOnsFor, setAddOnsFor] = useState<number | null>(null);
+  // ROM hacks of this game, from RetroArr's catalogue
+  const [hacks, setHacks] = useState<RomHack[]>([]);
+  useEffect(() => {
+    api.romHacks({ igdbId }).then((r) => setHacks(r.hacks)).catch(() => setHacks([]));
+  }, [igdbId]);
   const [showStory, setShowStory] = useState(false);
   const [trailer, setTrailer] = useState<string | null>(null);
   const [mine, setMine] = useState<{ liked: boolean; dismissed: boolean }>({ liked: false, dismissed: false });
@@ -327,6 +333,13 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
               </div>
             )}
           </section>
+
+          {hacks.length > 0 && (
+            <section>
+              <h2>ROM hacks of this game</h2>
+              <HackList hacks={hacks} showGame={false} onRequested={onRequested} />
+            </section>
+          )}
 
           {page.videos.length > 0 && (
             <section>

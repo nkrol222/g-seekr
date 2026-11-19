@@ -7,7 +7,8 @@ export const TRACKED_STATUSES: RequestStatus[] = ['approved', 'searching', 'down
 // An add-on request is open until what it asked for is in
 export const OPEN_ADDON_STATUSES: RequestStatus[] = ['pending', 'approved', 'searching', 'downloading'];
 
-export type RequestKind = 'game' | 'addons';
+// 'addons': updates and DLC of a game the library has; 'hack': a ROM hack from RetroArr's catalogue (variant hack:<id>)
+export type RequestKind = 'game' | 'addons' | 'hack';
 export interface WantedDlc {
   igdbId: number | null;
   title: string;
@@ -156,7 +157,7 @@ const toRequest = (r: Row): GameRequest => ({
   region: String(r.region ?? ''),
   variant: String(r.variant ?? ''),
   latestRevision: Number(r.latest_revision ?? 0) === 1,
-  kind: r.kind === 'addons' ? 'addons' : 'game',
+  kind: r.kind === 'addons' || r.kind === 'hack' ? r.kind : 'game',
   addOns: { latestUpdate: Number(r.latest_update ?? 0) === 1, allDlc: Number(r.all_dlc ?? 0) === 1, dlc: parseDlc(r.dlc) },
   createdAt: String(r.created_at),
   updatedAt: String(r.updated_at),
@@ -376,13 +377,22 @@ export class Store {
     version: { region: string; variant: string } = { region: '', variant: '' },
     kind: RequestKind = 'game',
   ): GameRequest | null {
-    const statuses = kind === 'addons' ? OPEN_ADDON_STATUSES : OPEN_STATUSES;
+    const statuses = kind === 'game' ? OPEN_STATUSES : OPEN_ADDON_STATUSES;
     const r = this.db
       .prepare(
         `${REQUEST_SELECT} WHERE r.igdb_id = ? AND r.platform_id = ? AND r.region = ? AND r.variant = ? AND r.kind = ? AND r.status IN (${statuses.map(() => '?').join(',')})`,
       )
       .get(igdbId, platformId, version.region, version.variant, kind, ...statuses) as Row | undefined;
     return r ? toRequest(r) : null;
+  }
+
+  // Open ROM hack requests, to show on the hacks they ask for
+  openHackRequests(): GameRequest[] {
+    return (
+      this.db
+        .prepare(`${REQUEST_SELECT} WHERE r.kind = 'hack' AND r.status IN (${OPEN_ADDON_STATUSES.map(() => '?').join(',')})`)
+        .all(...OPEN_ADDON_STATUSES) as Row[]
+    ).map(toRequest);
   }
 
   openRequestsForGames(igdbIds: number[]): GameRequest[] {

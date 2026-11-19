@@ -12,6 +12,27 @@ export interface RetroArrPlatform {
   hasAddOns?: boolean;
 }
 
+// A ROM hack in RetroArr's catalogue, with what the library has of it and of its game
+export interface RomHackInfo {
+  id: string;
+  title: string;
+  baseTitle: string;
+  baseIgdbId: number | null;
+  platformId: number | null;
+  kind: string;
+  authors: string[];
+  version: string | null;
+  year: number | null;
+  summary: string | null;
+  romhackingId: number | null;
+  // The hack's entry ('Downloaded' once patched), why patching failed, its game's entry
+  hackGameId: number | null;
+  hackStatus: string | null;
+  hackError: string | null;
+  baseGameId: number | null;
+  baseStatus: string | null;
+}
+
 // A game's DLC or expansion on IGDB
 export interface DlcInfo {
   igdbId: number;
@@ -526,6 +547,36 @@ export class RetroArrClient {
     if (wants.latestUpdate) body.wantLatestUpdate = true;
     if (wants.allDlc) body.wantAllDlc = true;
     await this.call('PUT', `/games/${id}/addons`, body, 180_000);
+  }
+
+  async romHacks(): Promise<RomHackInfo[]> {
+    const list = await this.call<Array<Record<string, unknown>>>('GET', '/romhacks');
+    const num = (v: unknown) => (typeof v === 'number' ? v : null);
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+    return list.map((h) => ({
+      id: String(h.id ?? ''),
+      title: String(h.title ?? ''),
+      baseTitle: String(h.baseTitle ?? ''),
+      baseIgdbId: num(h.baseIgdbId),
+      platformId: num(h.platformId),
+      kind: String(h.kind ?? 'improvement'),
+      authors: Array.isArray(h.authors) ? h.authors.filter((a): a is string => typeof a === 'string') : [],
+      version: str(h.version),
+      year: num(h.year),
+      summary: str(h.summary),
+      romhackingId: num(h.romhackingId),
+      hackGameId: num(h.hackGameId),
+      hackStatus: str(h.hackStatus),
+      hackError: str(h.hackError),
+      baseGameId: num(h.baseGameId),
+      baseStatus: str(h.baseStatus),
+    }));
+  }
+
+  // Adds the hack (and its game when the library lacks it) to RetroArr, which patches it once the game is in
+  async requestRomHack(id: string): Promise<{ hackGameId: number; baseGameId: number; baseStatus: string }> {
+    const r = await this.call<Record<string, unknown>>('POST', `/romhacks/${encodeURIComponent(id)}/request`, {});
+    return { hackGameId: Number(r.hackGameId), baseGameId: Number(r.baseGameId), baseStatus: String(r.baseStatus ?? '') };
   }
 
   // Searches the indexers and grabs a release that scores high enough. Can take a while.

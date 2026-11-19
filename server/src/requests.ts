@@ -1,7 +1,7 @@
 import { DEFAULT_VERSION, entryMatches, versionLabel, type Version } from './versions.js';
 import type { Config } from './config.js';
 import type { Notifier } from './notify.js';
-import { RetroArrError, type RetroArrAddOns, type RetroArrClient, type RetroArrGame, type RetroArrPlatform } from './retroarr.js';
+import { RetroArrError, type RetroArrAddOns, type RetroArrClient, type RetroArrGame, type RetroArrPlatform, type RomHackInfo } from './retroarr.js';
 import { buildTimeline, forUser, type Timeline } from './timeline.js';
 import { hasAddOns, NO_ADDONS, TRACKED_STATUSES, type AddOns, type GameRequest, type RequestKind, type RequestStatus, type Store, type User } from './store.js';
 
@@ -180,6 +180,46 @@ export class RequestService {
     return request;
   }
 
+  // A ROM hack from RetroArr's catalogue: RetroArr adds it (and its game when the library lacks it) and patches it once
+  // the game is in
+  async createHack(user: User, hack: RomHackInfo): Promise<GameRequest> {
+    const platform = (await this.platforms()).find((p) => p.id === hack.platformId);
+    if (!platform) throw new RequestError('That ROM hack’s platform can’t be requested.', 400, 'invalid_platform');
+    if (hack.hackStatus === 'Downloaded') throw new RequestError(`${hack.title} is already in the library.`, 409, 'in_library');
+    const version = { region: '', variant: `hack:${hack.id}` };
+    const existing = this.store.openRequestFor(hack.baseIgdbId ?? 0, platform.id, version, 'hack');
+    if (existing) throw new RequestError(`${hack.title} has already been requested.`, 409, 'already_requested', existing);
+    const { limit, used, days } = this.limitFor(user);
+    if (limit > 0 && used >= limit) throw new RequestError(`You can make ${limit} requests every ${days} days. Try again later.`, 429, 'limit_reached');
+
+    let request: GameRequest;
+    try {
+      request = this.store.createRequest({
+        userId: user.id,
+        igdbId: hack.baseIgdbId ?? 0,
+        platformId: platform.id,
+        platformName: platform.name,
+        title: hack.title,
+        year: hack.year,
+        coverUrl: null,
+        version: { ...version, latestRevision: false },
+        kind: 'hack',
+      });
+    } catch (err) {
+      const open = this.store.openRequestFor(hack.baseIgdbId ?? 0, platform.id, version, 'hack');
+      if (open) throw new RequestError(`${hack.title} has already been requested.`, 409, 'already_requested', open);
+      throw err;
+    }
+    this.log.info(`request ${request.id}: ${user.username} requested the ROM hack ${hack.title} (${platform.name})`);
+    if (this.isAdmin(user) || user.autoApprove) {
+      request = this.store.updateRequest(request.id, { status: 'approved', decidedBy: user.id, decidedAt: this.now().toISOString() })!;
+      void this.notifier.requestCreated(request);
+      return this.handOff(request);
+    }
+    void this.notifier.requestCreated(request);
+    return request;
+  }
+
   async approve(admin: User, id: number, note?: string): Promise<GameRequest> {
     const request = this.mustGet(id);
     if (request.status !== 'pending') throw new RequestError(`Only pending requests can be approved (this one is ${request.status}).`, 409, 'wrong_status', request);
@@ -226,6 +266,7 @@ export class RequestService {
     try {
       // RetroArr's entry for this version: the one it has, or a new one (another region or the translation is an entry of
       // its own beside the others)
+      if (request.kind === 'hack') return await this.handOffHack(request);
       const version = { region: request.region, variant: request.variant as Version['variant'], latestRevision: request.latestRevision };
       let game: RetroArrGame | undefined = (await this.retroarr.findByIgdb(request.igdbId, request.platformId)).find((g) => entryMatches(version, g));
       if (request.kind === 'addons') return await this.handOffAddOns(request, game);
@@ -263,6 +304,14 @@ export class RequestService {
       void this.notifier.statusChanged(failed);
       return failed;
     }
+  }
+
+  // A ROM hack: RetroArr adds it (and searches for its game when needed); the poller follows the hack's entry
+  private async handOffHack(request: GameRequest): Promise<GameRequest> {
+    const r = await this.retroarr.requestRomHack(request.variant.slice('hack:'.length));
+    const updated = this.store.updateRequest(request.id, { status: 'searching', retroarrGameId: r.hackGameId, release: null, error: null })!;
+    this.log.info(`request ${request.id}: ROM hack in RetroArr as game ${r.hackGameId}; its game ${r.baseGameId} is ${r.baseStatus}`);
+    return updated;
   }
 
   // An add-on request: RetroArr adds them to what it wants of the game and searches at once

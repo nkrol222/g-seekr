@@ -2,6 +2,7 @@ import type { Config } from './config.js';
 import type { DiscoverCard, DiscoverService, Filters } from './discover.js';
 import type { Logger } from './requests.js';
 import { RommError, type RommClient, type RommPlay } from './romm.js';
+import type { RomHackCard, RomHackCatalogue } from './romhacks.js';
 import type { Store, User } from './store.js';
 
 // Why a game is recommended: a game the user requested, played (in RomM) or liked
@@ -23,6 +24,8 @@ export interface Recommendations {
   romm: { available: boolean; linked: boolean; error: string | null };
   // The seeds used, so the page can say what recommendations are based on
   basedOn: number;
+  // ROM hacks of games the user played or liked, not yet in the library
+  hacks: (RomHackCard & { reasons: Reason[] })[];
 }
 
 interface Seed extends Reason {
@@ -51,6 +54,7 @@ export class RecommendService {
     private readonly romm: RommClient | null,
     private readonly log: Logger,
     private readonly now: () => Date = () => new Date(),
+    private readonly romHacks: RomHackCatalogue | null = null,
   ) {}
 
   // A like, a dismissal, a request or a RomM link changes what to recommend
@@ -112,7 +116,29 @@ export class RecommendService {
       .sort((a, b) => b.score - a.score || (b.card.rating ?? 0) - (a.card.rating ?? 0))
       .slice(0, 120)
       .map((e) => ({ ...e.card, reasons: e.reasons.slice(0, 3) }));
-    return { games, because, romm, basedOn: Math.min(seeds.length, MAX_SEEDS) };
+    return { games, because, romm, basedOn: Math.min(seeds.length, MAX_SEEDS), hacks: await this.hacksFor(seeds) };
+  }
+
+  // Hacks of the games the user played or liked (a request alone says less about liking a game)
+  private async hacksFor(seeds: Seed[]): Promise<Recommendations['hacks']> {
+    if (!this.romHacks) return [];
+    const strong = seeds.filter((s) => s.kind !== 'requested');
+    if (strong.length === 0) return [];
+    try {
+      const cards = await this.romHacks.cards({ igdbIds: strong.map((s) => s.igdbId) });
+      const rank = new Map(strong.map((s, i) => [s.igdbId, i]));
+      return cards
+        .filter((c) => c.status !== 'available')
+        .map((c) => {
+          const seed = strong.find((s) => s.igdbId === c.baseIgdbId)!;
+          return { ...c, reasons: [{ kind: seed.kind, igdbId: seed.igdbId, title: seed.title }] };
+        })
+        .sort((a, b) => rank.get(a.baseIgdbId!)! - rank.get(b.baseIgdbId!)!)
+        .slice(0, 20);
+    } catch (err) {
+      this.log.warn(`recommendations: ROM hacks: ${(err as Error).message}`);
+      return [];
+    }
   }
 
   // The user's games that recommendations grow from, strongest first

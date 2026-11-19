@@ -1,4 +1,5 @@
 import { parseAddOns, parseVersion } from './versions.js';
+import { HACK_KINDS, RomHackCatalogue } from './romhacks.js';
 import { DirectIgdbRetroArrClient, IgdbError } from './igdb.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -64,7 +65,9 @@ export async function buildApp(deps: AppDeps) {
   const issues = new IssueService(store, deps.retroarr, notifier, log, (u) => requests.isAdmin(u), deps.now);
   const discover = new DiscoverService(store, deps.retroarr, requests);
   const romm = config.rommApiUrl ? new RommClient(config.rommApiUrl, deps.fetchImpl) : null;
-  const recommend = new RecommendService(config, store, discover, romm, log, deps.now);
+  // RetroArr's ROM hack catalogue (homelab-iac's files/retroarr/romhacks.yaml)
+  const romHacks = new RomHackCatalogue(deps.retroarr, store, () => requests.platforms(), deps.now);
+  const recommend = new RecommendService(config, store, discover, romm, log, deps.now, romHacks);
   const collections = new CollectionService(db, store, deps.retroarr, requests, discover, log, deps.fetchImpl, deps.now);
   const limiter = new LoginLimiter();
 
@@ -296,6 +299,22 @@ export async function buildApp(deps: AppDeps) {
     const page = await discover.game(igdbId, discover.filtersFor(req.user!).includeAdult);
     const liked = store.likes(req.user!.id).some((l) => l.igdbId === igdbId);
     return { ...page, mine: { liked, dismissed: store.dismissed(req.user!.id).has(igdbId) } };
+  });
+
+  // ---- ROM hacks ----
+
+  // ?igdbId= (the hacks of a game), ?platform=, ?kind=
+  app.get<{ Querystring: { igdbId?: string; platform?: string; kind?: string } }>('/api/romhacks', async (req) => {
+    const igdbId = Number(req.query.igdbId) || null;
+    const platformId = Number(req.query.platform) || undefined;
+    const kind = HACK_KINDS.find((k) => k === req.query.kind);
+    try {
+      return { hacks: await romHacks.cards({ igdbIds: igdbId ? [igdbId] : undefined, platformId, kind }, requests.isAdmin(req.user!)), kinds: HACK_KINDS };
+    } catch (err) {
+      // An older RetroArr without the catalogue, or RetroArr down: no hacks, not an error page
+      app.log.warn(`romhacks: ${(err as Error).message}`);
+      return { hacks: [], kinds: HACK_KINDS, error: 'RetroArr’s ROM hack catalogue couldn’t be read.' };
+    }
   });
 
   // ---- recommendations ----
@@ -544,8 +563,18 @@ export async function buildApp(deps: AppDeps) {
       latestUpdate?: unknown;
       allDlc?: unknown;
       dlc?: unknown;
+      hackId?: unknown;
     };
   }>('/api/requests', async (req, reply) => {
+    // A ROM hack from RetroArr's catalogue: { kind: 'hack', hackId }
+    if (req.body?.kind === 'hack') {
+      const hack = typeof req.body.hackId === 'string' ? await romHacks.find(req.body.hackId) : null;
+      if (!hack) return reply.code(404).send({ error: 'That ROM hack isn’t in the catalogue.' });
+      const created = await requests.createHack(req.user!, hack);
+      romHacks.forget();
+      recommend.forget(req.user!.id);
+      return reply.code(201).send({ request: created });
+    }
     const igdbId = Number(req.body?.igdbId);
     const platformId = Number(req.body?.platformId);
     if (!Number.isInteger(igdbId) || igdbId <= 0 || !Number.isInteger(platformId) || platformId <= 0) {

@@ -157,7 +157,43 @@ export interface Recommendations {
   because: { seed: Reason; games: Recommended[] }[];
   romm: RommLink;
   basedOn: number;
+  // ROM hacks of games the user played or liked
+  hacks?: RomHack[];
 }
+
+// A ROM hack from RetroArr's catalogue (homelab-iac's files/retroarr/romhacks.yaml)
+export interface RomHack {
+  id: string;
+  title: string;
+  baseTitle: string;
+  baseIgdbId: number | null;
+  platformId: number | null;
+  platformName: string | null;
+  kind: string;
+  authors: string[];
+  version: string | null;
+  year: number | null;
+  summary: string | null;
+  romhackingId: number | null;
+  // The game it patches, in RetroArr ('Downloaded' when the library has it)
+  baseStatus: string | null;
+  // 'available' once patched; an open request's status; null when neither
+  status: RequestStatus | null;
+  requestId: number | null;
+  // Why patching failed (admins)
+  error?: string | null;
+  reasons?: Reason[];
+}
+
+export const HACK_KIND_LABEL: Record<string, string> = {
+  improvement: 'Improvement',
+  difficulty: 'Difficulty',
+  'new-content': 'New content',
+  'quality-of-life': 'Quality of life',
+  graphics: 'Graphics',
+  story: 'Story',
+  'translation-plus': 'Translation+',
+};
 
 export interface RommStatus extends RommLink {
   rommUsername: string | null;
@@ -446,6 +482,14 @@ export const api = {
   recentlyAdded: () => call<{ games: GameCard[] }>('GET', '/discover/recent'),
   game: (igdbId: number) => call<GamePage>('GET', `/games/${igdbId}`),
   recommendations: () => call<Recommendations>('GET', '/recommendations'),
+  romHacks: (q: { igdbId?: number; platform?: number; kind?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (q.igdbId) params.set('igdbId', String(q.igdbId));
+    if (q.platform) params.set('platform', String(q.platform));
+    if (q.kind) params.set('kind', q.kind);
+    return call<{ hacks: RomHack[]; kinds: string[]; error?: string }>('GET', `/romhacks${params.size ? `?${params}` : ''}`);
+  },
+  requestHack: (hackId: string) => call<{ request: GameRequest }>('POST', '/requests', { kind: 'hack', hackId }),
   like: (igdbId: number, liked: boolean, title: string) => call<{ liked: boolean }>('PUT', `/games/${igdbId}/like`, { liked, title }),
   dismiss: (igdbId: number, dismissed: boolean) => call<{ dismissed: boolean }>('PUT', `/games/${igdbId}/dismiss`, { dismissed }),
   romm: () => call<RommStatus>('GET', '/me/romm'),

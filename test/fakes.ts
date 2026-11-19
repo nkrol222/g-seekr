@@ -36,6 +36,9 @@ export class Fakes {
     [1020, { title: 'Chrono Trigger', year: 1995, platforms: [41, 50] }],
     [427, { title: 'Final Fantasy VII', year: 1997, platforms: [50] }],
   ]);
+  // RetroArr's ROM hack catalogue (GET /romhacks), and the hacks requested
+  romHacks: Array<Record<string, unknown>> = [];
+  romHacksDown = false;
   // A console with updates and DLC, and a game on it, for the tests of those
   addSwitch() {
     this.platforms.push({ id: 70, name: 'Nintendo Switch', slug: 'switch', category: 'Nintendo', enabled: true, hasAddOns: true });
@@ -159,6 +162,21 @@ export class Fakes {
       if (m) {
         const g = this.games.find((x) => x.id === Number(m![1]));
         return g ? json(g) : json({}, 404);
+      }
+      if (path === '/romhacks') return this.romHacksDown ? json({ message: 'boom' }, 500) : json(this.romHacks);
+      m = path.match(/^\/romhacks\/([a-z0-9-]+)\/request$/);
+      if (m && method === 'POST') {
+        const h = this.romHacks.find((x) => x.id === m![1]);
+        if (!h) return json({ message: 'no such hack' }, 404);
+        let hack = this.games.find((g) => g.variant === `hack:${h.id}`);
+        if (!hack) {
+          hack = { id: this.nextGameId++, title: String(h.title), igdbId: Number(h.baseIgdbId), platformId: Number(h.platformId), status: 0, monitored: false, variant: `hack:${h.id}` };
+          this.games.push(hack);
+          h.hackGameId = hack.id;
+          h.hackStatus = 'Missing';
+        }
+        const base = this.games.find((g) => g.igdbId === h.baseIgdbId && g.platformId === h.platformId && !g.variant);
+        return json({ hackGameId: hack.id, baseGameId: base?.id ?? 0, baseStatus: base ? 'Downloaded' : 'Missing', searching: !base });
       }
       m = path.match(/^\/games\/(\d+)\/addons$/);
       if (m) {
