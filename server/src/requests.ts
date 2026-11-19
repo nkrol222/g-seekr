@@ -1,3 +1,4 @@
+import { DEFAULT_VERSION, entryMatches, versionLabel, type Version } from './versions.js';
 import type { Config } from './config.js';
 import type { Notifier } from './notify.js';
 import { RetroArrError, type RetroArrClient, type RetroArrGame, type RetroArrPlatform } from './retroarr.js';
@@ -97,12 +98,15 @@ export class RequestService {
 
   // ---- lifecycle ----
 
-  async create(user: User, igdbId: number, platformId: number): Promise<GameRequest> {
+  // version: which version of the game (a region, the English translation, the latest revision); the default is any
+  async create(user: User, igdbId: number, platformId: number, version: Version = DEFAULT_VERSION): Promise<GameRequest> {
     const platform = (await this.platforms()).find((p) => p.id === platformId);
     if (!platform) throw new RequestError('That platform can’t be requested.', 400, 'invalid_platform');
+    const which = versionLabel(version);
+    const asked = which ? `that version (${which})` : 'that platform';
 
-    const existing = this.store.openRequestFor(igdbId, platformId);
-    if (existing) throw new RequestError('This game has already been requested for that platform.', 409, 'already_requested', existing);
+    const existing = this.store.openRequestFor(igdbId, platformId, version);
+    if (existing) throw new RequestError(`This game has already been requested for ${asked}.`, 409, 'already_requested', existing);
 
     const { limit, used, days } = this.limitFor(user);
     if (limit > 0 && used >= limit) {
@@ -116,8 +120,8 @@ export class RequestService {
     }
 
     const inLibrary = await this.retroarr.findByIgdb(igdbId, platformId);
-    if (inLibrary.some((g) => g.status === 'Downloaded')) {
-      throw new RequestError(`${meta.title} is already in the library for ${platform.name}.`, 409, 'in_library');
+    if (inLibrary.some((g) => g.status === 'Downloaded' && entryMatches(version, g))) {
+      throw new RequestError(`${meta.title} is already in the library for ${platform.name}${which ? ` (${which})` : ''}.`, 409, 'in_library');
     }
 
     let request: GameRequest;
@@ -130,11 +134,12 @@ export class RequestService {
         title: meta.title,
         year: meta.year || null,
         coverUrl: meta.coverUrl,
+        version,
       });
     } catch (err) {
-      // Lost a race with another request for the same game and platform
-      const open = this.store.openRequestFor(igdbId, platformId);
-      if (open) throw new RequestError('This game has already been requested for that platform.', 409, 'already_requested', open);
+      // Lost a race with another request for the same game, platform and version
+      const open = this.store.openRequestFor(igdbId, platformId, version);
+      if (open) throw new RequestError(`This game has already been requested for ${asked}.`, 409, 'already_requested', open);
       throw err;
     }
     this.log.info(`request ${request.id}: ${user.username} requested ${request.title} (${platform.name})`);
@@ -192,13 +197,19 @@ export class RequestService {
   // sweep searches again later anyway.
   async handOff(request: GameRequest): Promise<GameRequest> {
     try {
-      let game: RetroArrGame | undefined = (await this.retroarr.findByIgdb(request.igdbId, request.platformId))[0];
+      // RetroArr's entry for this version: the one it has, or a new one (another region or the translation is an entry of
+      // its own beside the others)
+      const version = { region: request.region, variant: request.variant as Version['variant'], latestRevision: request.latestRevision };
+      let game: RetroArrGame | undefined = (await this.retroarr.findByIgdb(request.igdbId, request.platformId)).find((g) => entryMatches(version, g));
       if (!game) {
         const meta = await this.retroarr.lookupIgdb(request.igdbId);
         const body: Record<string, unknown> = {
           ...(meta?.raw ?? { title: request.title, igdbId: request.igdbId, year: request.year ?? 0 }),
           platformId: request.platformId,
           monitored: true,
+          region: version.region,
+          variant: version.variant,
+          preferLatestRevision: version.latestRevision,
         };
         for (const key of ['id', 'platform', 'path', 'status', 'gameFiles', 'isOwned', 'availablePlatforms', 'availablePlatformIds']) delete body[key];
         game = await this.retroarr.addGame(body);

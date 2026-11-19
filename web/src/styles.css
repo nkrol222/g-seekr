@@ -2400,3 +2400,48 @@ table.table {
 .request-card .main-col > .link-button {
   margin-top: 0.5rem;
 }
+
+/* Versions of a game on its page: what the library has, other versions' requests, the picker */
+.platform-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.platform-block .versions {
+  margin: 0 0 0 4px;
+  font-size: 0.85em;
+}
+.version-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--gray-700);
+  background: var(--gray-900);
+}
+.platform-block .platform-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.platform-block .platform-row .name {
+  margin-right: auto;
+}
+.version-picker label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9em;
+}
+.version-picker select {
+  min-width: 10rem;
+}
+.version-picker p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.version-tag {
+  opacity: 0.85;
+}

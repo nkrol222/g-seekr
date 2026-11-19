@@ -43,7 +43,8 @@ function fakes() {
             first_release_date: 795571200,
             platforms: [19],
             release_dates: [
-              { platform: { id: 19, name: 'SNES' }, date: 795571200 },
+              { platform: { id: 19, name: 'SNES' }, date: 795571200, region: 5 },
+              { platform: { id: 19, name: 'SNES' }, date: 800000000, release_region: { region: 'north_america' } },
               { platform: { id: 7, name: 'PlayStation' }, date: 941932800 },
             ],
             franchises: [{ id: 5, name: 'Chrono' }],
@@ -92,7 +93,7 @@ describe('IGDB, asked directly', () => {
     expect(games[0]!.platformIds).toEqual([50]);
     expect(games[0]!.rating).toBe(92.5);
     expect(games[0]!.coverUrl).toBe('https://images.igdb.com/igdb/image/upload/t_cover_big/co2.jpg');
-    expect(games[1]!.library).toEqual([{ gameId: 7, platformId: 41, status: 'Downloaded', rommId: 55 }]);
+    expect(games[1]!.library).toEqual([{ gameId: 7, platformId: 41, status: 'Downloaded', rommId: 55, region: '', variant: '', revision: null }]);
     const body = c.state.igdbCalls.find((x) => x.endpoint === 'games')!.body;
     expect(body).toContain('where platforms = (7,19) & version_parent = null & parent_game = null');
     expect(body).toContain('sort total_rating desc');
@@ -148,8 +149,8 @@ describe('IGDB, asked directly', () => {
     const d = await c.retroarr.discoverGame(1020, false);
     expect(d!.game.title).toBe('Chrono Trigger');
     expect(d!.releases).toEqual([
-      { platform: 'SNES', platformId: 41, date: '1995-03-19' },
-      { platform: 'PlayStation', platformId: 50, date: '1999-11-07' },
+      { platform: 'SNES', platformId: 41, date: '1995-03-19', regions: ['Japan', 'USA'] },
+      { platform: 'PlayStation', platformId: 50, date: '1999-11-07', regions: [] },
     ]);
     expect(d!.videos).toEqual([{ name: 'Trailer', youtubeId: 'abcdefgh' }]);
     expect(d!.developer).toBe('Square');

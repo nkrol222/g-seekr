@@ -50,6 +50,10 @@ export interface GameRequest {
   availableAt: string | null;
   // The game in RomM, once RetroArr's RomM sync has seen it there
   rommId: number | null;
+  // The version asked for: '' region is any; variant '' or en-translation
+  region: string;
+  variant: string;
+  latestRevision: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -117,6 +121,9 @@ const toRequest = (r: Row): GameRequest => ({
   decidedAt: r.decided_at == null ? null : String(r.decided_at),
   availableAt: r.available_at == null ? null : String(r.available_at),
   rommId: r.romm_id == null ? null : Number(r.romm_id),
+  region: String(r.region ?? ''),
+  variant: String(r.variant ?? ''),
+  latestRevision: Number(r.latest_revision ?? 0) === 1,
   createdAt: String(r.created_at),
   updatedAt: String(r.updated_at),
 });
@@ -295,14 +302,24 @@ export class Store {
 
   // ---- requests ----
 
-  createRequest(r: { userId: number; igdbId: number; platformId: number; platformName: string; title: string; year: number | null; coverUrl: string | null }): GameRequest {
+  createRequest(r: {
+    userId: number;
+    igdbId: number;
+    platformId: number;
+    platformName: string;
+    title: string;
+    year: number | null;
+    coverUrl: string | null;
+    version?: { region: string; variant: string; latestRevision: boolean };
+  }): GameRequest {
     const now = this.ts();
+    const v = r.version ?? { region: '', variant: '', latestRevision: false };
     const res = this.db
       .prepare(
-        `INSERT INTO requests (user_id, igdb_id, platform_id, platform_name, title, year, cover_url, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        `INSERT INTO requests (user_id, igdb_id, platform_id, platform_name, title, year, cover_url, status, region, variant, latest_revision, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
       )
-      .run(r.userId, r.igdbId, r.platformId, r.platformName, r.title, r.year, r.coverUrl, now, now);
+      .run(r.userId, r.igdbId, r.platformId, r.platformName, r.title, r.year, r.coverUrl, v.region, v.variant, v.latestRevision ? 1 : 0, now, now);
     const id = Number(res.lastInsertRowid);
     this.addRequestEvent(id, 'requested', { actorId: r.userId });
     return this.request(id)!;
@@ -313,10 +330,11 @@ export class Store {
     return r ? toRequest(r) : null;
   }
 
-  openRequestFor(igdbId: number, platformId: number): GameRequest | null {
+  // The open request for that version (the default one when none is given)
+  openRequestFor(igdbId: number, platformId: number, version: { region: string; variant: string } = { region: '', variant: '' }): GameRequest | null {
     const r = this.db
-      .prepare(`${REQUEST_SELECT} WHERE r.igdb_id = ? AND r.platform_id = ? AND r.status IN (${OPEN_STATUSES.map(() => '?').join(',')})`)
-      .get(igdbId, platformId, ...OPEN_STATUSES) as Row | undefined;
+      .prepare(`${REQUEST_SELECT} WHERE r.igdb_id = ? AND r.platform_id = ? AND r.region = ? AND r.variant = ? AND r.status IN (${OPEN_STATUSES.map(() => '?').join(',')})`)
+      .get(igdbId, platformId, version.region, version.variant, ...OPEN_STATUSES) as Row | undefined;
     return r ? toRequest(r) : null;
   }
 

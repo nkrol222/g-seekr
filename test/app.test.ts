@@ -212,6 +212,34 @@ describe('requests', () => {
     expect((await post(alice.headers, 1020, 50)).statusCode).toBe(201);
   });
 
+  it('requests another version of a game the library has: a second copy in RetroArr', async () => {
+    await start();
+    const alice = await login('alice');
+    const root = await login('root');
+    fakes.games.push({ id: 7, title: 'Chrono Trigger', igdbId: 1020, platformId: 41, status: 4, monitored: true, region: 'USA', variant: '' });
+    const post = (payload: Record<string, unknown>) => built.app.inject({ method: 'POST', url: '/api/requests', headers: alice.headers, payload: { igdbId: 1020, platformId: 41, ...payload } });
+
+    // the library has the USA release: any region, or the USA, is already there
+    expect((await post({})).json().code).toBe('in_library');
+    expect((await post({ region: 'usa' })).statusCode).toBe(409);
+    expect((await post({ region: 'Mars' })).statusCode).toBe(400);
+    expect((await post({ variant: 'hack' })).statusCode).toBe(400);
+
+    const created = await post({ region: 'Japan', variant: 'en-translation', latestRevision: true });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().request).toMatchObject({ region: 'Japan', variant: 'en-translation', latestRevision: true });
+    // the same version again is a duplicate; another one isn't
+    const dup = await post({ region: 'Japan', variant: 'en-translation' });
+    expect(dup.json().code).toBe('already_requested');
+    expect(dup.json().error).toContain('Japan · English translation');
+
+    const approved = await built.app.inject({ method: 'POST', url: `/api/requests/${created.json().request.id}/approve`, headers: root.headers, payload: {} });
+    expect(approved.json().request).toMatchObject({ status: 'searching', retroarrGameId: 100 });
+    await flush();
+    // a new entry beside the USA one, not the USA one reused
+    expect(fakes.addedBodies[0]).toMatchObject({ igdbId: 1020, platformId: 41, region: 'Japan', variant: 'en-translation', preferLatestRevision: true });
+  });
+
   it('approves admins and auto-approve users at once, and reuses a game RetroArr already has', async () => {
     await start();
     fakes.games.push({ id: 7, title: 'Final Fantasy VII', igdbId: 427, platformId: 50, status: 2, monitored: false });

@@ -196,6 +196,16 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX igdb_cache_at ON igdb_cache(at);
   `,
+  // 11: which version a request is for (a region, the English translation, the latest revision); one open request per
+  // game, platform and version
+  `
+  ALTER TABLE requests ADD COLUMN region TEXT NOT NULL DEFAULT '';
+  ALTER TABLE requests ADD COLUMN variant TEXT NOT NULL DEFAULT '';
+  ALTER TABLE requests ADD COLUMN latest_revision INTEGER NOT NULL DEFAULT 0;
+  DROP INDEX ux_requests_open;
+  CREATE UNIQUE INDEX ux_requests_open ON requests(igdb_id, platform_id, region, variant)
+    WHERE status IN ('pending', 'approved', 'searching', 'downloading', 'available');
+  `,
 ];
 
 export function openDb(path: string): Db {

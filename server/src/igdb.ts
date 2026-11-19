@@ -46,12 +46,21 @@ interface IgdbDetail extends IgdbCard {
   themes?: { id: number; name: string }[];
   game_modes?: { id: number; name: string }[];
   involved_companies?: { company?: { id: number; name: string }; developer?: boolean; publisher?: boolean }[];
-  release_dates?: { platform?: { id: number; name: string }; date?: number }[];
+  // region: IGDB's old enum; release_region: its newer table (either may be there)
+  release_dates?: { platform?: { id: number; name: string }; date?: number; region?: number; release_region?: { region?: string } }[];
   franchises?: { id: number; name: string }[];
   similar_games?: number[];
 }
 
 type Size = 'cover_big' | '1080p' | 'screenshot_big';
+// IGDB's release regions in RetroArr's region names
+const REGION_ENUM: Record<number, string> = { 1: 'Europe', 2: 'USA', 3: 'Australia', 4: 'Australia', 5: 'Japan', 6: 'China', 7: 'Asia', 8: 'World', 9: 'Korea', 10: 'Brazil' };
+const REGION_NAME: Record<string, string> = {
+  europe: 'Europe', north_america: 'USA', australia: 'Australia', new_zealand: 'Australia', japan: 'Japan', china: 'China', asia: 'Asia', worldwide: 'World', korea: 'Korea', brazil: 'Brazil',
+};
+const regionOf = (r: { region?: number; release_region?: { region?: string } }): string | null =>
+  (r.release_region?.region ? REGION_NAME[r.release_region.region.toLowerCase()] : undefined) ?? (r.region ? REGION_ENUM[r.region] : undefined) ?? null;
+
 const image = (id: string | undefined, size: Size) => (id ? `https://images.igdb.com/igdb/image/upload/t_${size}/${id}.jpg` : null);
 const escape = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 const unix = (d: Date) => Math.floor(d.getTime() / 1000);
@@ -333,17 +342,21 @@ export class DirectIgdbRetroArrClient extends RetroArrClient {
     const fields =
       `${CARD_FIELDS}, storyline, screenshots.image_id, artworks.image_id, videos.video_id, videos.name, themes.id, themes.name, ` +
       'game_modes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, ' +
-      'release_dates.platform.id, release_dates.platform.name, release_dates.date, franchises.id, franchises.name, similar_games, involved_companies.company.id';
+      'release_dates.platform.id, release_dates.platform.name, release_dates.date, release_dates.region, release_dates.release_region.region, ' +
+      'franchises.id, franchises.name, similar_games, involved_companies.company.id';
     const [g] = await this.q<IgdbDetail>(`game:${igdbId}`, 'games', `fields ${fields}; where id = ${igdbId};`);
     if (!g) return null;
     const { byIgdb } = await this.platformsByIgdb();
     const card = (c: IgdbCard) => this.card(c, byIgdb);
     const companies = g.involved_companies ?? [];
-    const firstDates = new Map<number, { name: string; date?: number }>();
+    const firstDates = new Map<number, { name: string; date?: number; regions: Set<string> }>();
     for (const r of g.release_dates ?? []) {
       if (!r.platform) continue;
-      const seen = firstDates.get(r.platform.id);
-      if (!seen || (r.date ?? Infinity) < (seen.date ?? Infinity)) firstDates.set(r.platform.id, { name: r.platform.name, date: r.date });
+      const seen = firstDates.get(r.platform.id) ?? { name: r.platform.name, date: r.date, regions: new Set<string>() };
+      if ((r.date ?? Infinity) < (seen.date ?? Infinity)) seen.date = r.date;
+      const region = regionOf(r);
+      if (region) seen.regions.add(region);
+      firstDates.set(r.platform.id, seen);
     }
     const adult = includeAdult ? '' : ` & (themes = null | themes != (${ADULT_THEME}))`;
     const others = `id != ${igdbId} & version_parent = null & parent_game = null & cover != null${adult}`;
@@ -375,7 +388,12 @@ export class DirectIgdbRetroArrClient extends RetroArrClient {
       publishers: [...new Set(companies.filter((c) => c.publisher && c.company).map((c) => c.company!.name))],
       franchises: (g.franchises ?? []).map((f) => f.name),
       releases: [...firstDates.entries()]
-        .map(([id, r]) => ({ platform: r.name, platformId: byIgdb.get(id)?.[0] ?? null, date: r.date ? new Date(r.date * 1000).toISOString().slice(0, 10) : null }))
+        .map(([id, r]) => ({
+          platform: r.name,
+          platformId: byIgdb.get(id)?.[0] ?? null,
+          date: r.date ? new Date(r.date * 1000).toISOString().slice(0, 10) : null,
+          regions: [...r.regions].sort(),
+        }))
         .sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999')),
       similar: similar.map(card),
       series: series.map(card),

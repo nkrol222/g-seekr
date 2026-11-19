@@ -21,14 +21,30 @@ export interface SearchResult {
   coverUrl: string | null;
   owned: boolean;
   platformIds: number[];
-  requests: { id: number; platformId: number; status: RequestStatus }[];
+  // region/variant: the version a request is for ('' = any region, the release itself)
+  requests: { id: number; platformId: number; status: RequestStatus; region?: string; variant?: string }[];
 }
+
+// Which version of a game a request is for
+export interface Version {
+  region: string;
+  variant: '' | 'en-translation';
+  latestRevision: boolean;
+}
+
+export const REGIONS = ['USA', 'Europe', 'Japan', 'World', 'Australia', 'Korea', 'China', 'Brazil', 'Asia'];
+
+// "Europe · English translation · latest revision"; '' for the default
+export const versionLabel = (v: { region?: string; variant?: string; latestRevision?: boolean }) =>
+  [v.region ?? '', v.variant === 'en-translation' ? 'English translation' : '', v.latestRevision ? 'latest revision' : ''].filter(Boolean).join(' · ');
 
 // A game in Discover, Browse and search: the platforms it can be requested for, whether the library has it, its requests
 export interface GameCard extends SearchResult {
   // The platforms the library has it on, and the game in RomM on each (for "Play in RomM")
   inLibrary?: number[];
   romm?: { platformId: number; rommId: number }[];
+  // Which versions the library has, per platform
+  versions?: { platformId: number; region: string; variant: string; revision: string | null; downloaded: boolean }[];
   rating: number | null;
   ratingCount: number | null;
   genres: string[];
@@ -85,7 +101,8 @@ export interface GamePage {
   franchises: string[];
   // Its series, each a collection page
   seriesRefs?: FilterOption[];
-  releases: { platform: string; platformId: number | null; date: string | null; requestable: boolean }[];
+  // regions: where it came out on that platform (empty when IGDB is asked through RetroArr)
+  releases: { platform: string; platformId: number | null; date: string | null; requestable: boolean; regions?: string[] }[];
   similar: GameCard[];
   series: GameCard[];
   developer: string | null;
@@ -168,6 +185,10 @@ export interface GameRequest {
   availableAt: string | null;
   // The game in RomM, once RomM has it (RomM scans new games within the hour)
   rommId: number | null;
+  // The version asked for
+  region?: string;
+  variant?: string;
+  latestRevision?: boolean;
   // Where it's at, when the list was asked for with the status
   now?: TimelineStep;
 }
@@ -378,7 +399,7 @@ export const api = {
   search: (q: string) => call<{ results: SearchResult[] }>('GET', `/search?q=${encodeURIComponent(q)}`),
   requests: (scope: 'mine' | 'all', withStatus = false) => call<{ requests: GameRequest[] }>('GET', `/requests?scope=${scope}${withStatus ? '&withStatus=1' : ''}`),
   timeline: (id: number) => call<Timeline>('GET', `/requests/${id}/timeline`),
-  request: (igdbId: number, platformId: number) => call<{ request: GameRequest }>('POST', '/requests', { igdbId, platformId }),
+  request: (igdbId: number, platformId: number, version?: Version) => call<{ request: GameRequest }>('POST', '/requests', { igdbId, platformId, ...version }),
   approve: (id: number, note?: string) => call<{ request: GameRequest }>('POST', `/requests/${id}/approve`, { note }),
   decline: (id: number, note?: string) => call<{ request: GameRequest }>('POST', `/requests/${id}/decline`, { note }),
   retry: (id: number) => call<{ request: GameRequest }>('POST', `/requests/${id}/retry`, {}),
