@@ -11,7 +11,29 @@ export interface Platform {
   name: string;
   slug: string;
   category: string | null;
+  // Its games get updates and DLC as separate downloads
+  hasAddOns?: boolean;
 }
+
+export interface Dlc {
+  igdbId: number;
+  title: string;
+  year: number | null;
+  kind: string;
+}
+// Updates and DLC asked for: with a game, or (kind addons) for a game the library has
+export interface AddOns {
+  latestUpdate: boolean;
+  allDlc: boolean;
+  dlc: { igdbId: number | null; title: string }[];
+}
+export const NO_ADDONS: AddOns = { latestUpdate: false, allDlc: false, dlc: [] };
+export const addOnsLabel = (a: AddOns | undefined) =>
+  a
+    ? [a.latestUpdate ? 'latest update' : '', a.allDlc ? 'all DLC' : '', a.dlc.length === 1 ? a.dlc[0]!.title : a.dlc.length > 1 ? `${a.dlc.length} DLC` : '']
+        .filter(Boolean)
+        .join(' · ')
+    : '';
 
 export interface SearchResult {
   igdbId: number;
@@ -107,6 +129,8 @@ export interface GamePage {
   series: GameCard[];
   developer: string | null;
   fromDeveloper: GameCard[];
+  // Its DLC and expansions on IGDB
+  dlc?: Dlc[];
   // What the user said about it
   mine: { liked: boolean; dismissed: boolean };
 }
@@ -189,6 +213,9 @@ export interface GameRequest {
   region?: string;
   variant?: string;
   latestRevision?: boolean;
+  // 'addons': updates and DLC for a game the library has; addOns: what was asked of them
+  kind?: 'game' | 'addons';
+  addOns?: AddOns;
   // Where it's at, when the list was asked for with the status
   now?: TimelineStep;
 }
@@ -399,7 +426,8 @@ export const api = {
   search: (q: string) => call<{ results: SearchResult[] }>('GET', `/search?q=${encodeURIComponent(q)}`),
   requests: (scope: 'mine' | 'all', withStatus = false) => call<{ requests: GameRequest[] }>('GET', `/requests?scope=${scope}${withStatus ? '&withStatus=1' : ''}`),
   timeline: (id: number) => call<Timeline>('GET', `/requests/${id}/timeline`),
-  request: (igdbId: number, platformId: number, version?: Version) => call<{ request: GameRequest }>('POST', '/requests', { igdbId, platformId, ...version }),
+  request: (igdbId: number, platformId: number, version?: Version, addOns?: AddOns, kind: 'game' | 'addons' = 'game') =>
+    call<{ request: GameRequest }>('POST', '/requests', { igdbId, platformId, ...version, ...addOns, kind }),
   approve: (id: number, note?: string) => call<{ request: GameRequest }>('POST', `/requests/${id}/approve`, { note }),
   decline: (id: number, note?: string) => call<{ request: GameRequest }>('POST', `/requests/${id}/decline`, { note }),
   retry: (id: number) => call<{ request: GameRequest }>('POST', `/requests/${id}/retry`, {}),

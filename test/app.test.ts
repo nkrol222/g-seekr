@@ -240,6 +240,66 @@ describe('requests', () => {
     expect(fakes.addedBodies[0]).toMatchObject({ igdbId: 1020, platformId: 41, region: 'Japan', variant: 'en-translation', preferLatestRevision: true });
   });
 
+  it('requests a Switch game with its latest update and DLC: RetroArr is told once the game is added', async () => {
+    fakes.addSwitch();
+    await start();
+    const alice = await login('alice');
+    const root = await login('root');
+    const post = (payload: Record<string, unknown>) => built.app.inject({ method: 'POST', url: '/api/requests', headers: alice.headers, payload });
+
+    const platforms = await built.app.inject({ url: '/api/platforms', headers: alice.headers });
+    expect(platforms.json().find((p: { id: number }) => p.id === 70)).toMatchObject({ hasAddOns: true });
+    expect((await post({ igdbId: 7346, platformId: 70, dlc: 'all' })).statusCode).toBe(400);
+
+    const created = await post({ igdbId: 7346, platformId: 70, latestUpdate: true, dlc: [{ igdbId: 900, title: 'Expansion Pass' }, { igdbId: 900, title: 'Expansion Pass' }] });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().request).toMatchObject({ kind: 'game', addOns: { latestUpdate: true, allDlc: false, dlc: [{ igdbId: 900, title: 'Expansion Pass' }] } });
+
+    await built.app.inject({ method: 'POST', url: `/api/requests/${created.json().request.id}/approve`, headers: root.headers, payload: {} });
+    await flush();
+    expect(fakes.addOnPuts).toEqual([
+      { gameId: 100, body: { dlc: [{ igdbId: 900, title: 'Expansion Pass' }], append: true, search: false, wantLatestUpdate: true } },
+    ]);
+
+    // A platform without updates or DLC: the add-ons are left out
+    const snes = await post({ igdbId: 1020, platformId: 41, latestUpdate: true, allDlc: true });
+    expect(snes.json().request.addOns).toEqual({ latestUpdate: false, allDlc: false, dlc: [] });
+  });
+
+  it('requests DLC for a game the library has, and is done once RetroArr has it', async () => {
+    fakes.addSwitch();
+    await start();
+    const alice = await login('alice');
+    const root = await login('root');
+    const post = (h: Record<string, string>, payload: Record<string, unknown>) =>
+      built.app.inject({ method: 'POST', url: '/api/requests', headers: h, payload: { igdbId: 7346, platformId: 70, kind: 'addons', ...payload } });
+
+    expect((await post(alice.headers, { dlc: [{ igdbId: 900, title: 'Expansion Pass' }] })).json().code).toBe('not_in_library');
+    fakes.games.push({ id: 7, title: 'Breath of the Wild', igdbId: 7346, platformId: 70, status: 4, monitored: true });
+    expect((await post(alice.headers, {})).json().code).toBe('nothing_asked');
+    expect((await post(alice.headers, { igdbId: 1020, platformId: 41, latestUpdate: true })).json().code).toBe('no_addons');
+
+    const created = await post(root.headers, { dlc: [{ igdbId: 900, title: 'Expansion Pass' }] });
+    expect(created.statusCode).toBe(201);
+    // an admin's request goes straight to RetroArr, which searches at once
+    expect(created.json().request).toMatchObject({ kind: 'addons', status: 'searching', retroarrGameId: 7 });
+    expect(fakes.addOnPuts[0]).toEqual({ gameId: 7, body: { dlc: [{ igdbId: 900, title: 'Expansion Pass' }], append: true, search: true } });
+    expect((await post(alice.headers, { allDlc: true })).json().code).toBe('already_requested');
+    // the game itself is still in the library
+    expect((await post(alice.headers, { kind: 'game' })).json().code).toBe('in_library');
+
+    // RetroArr's import of something else of the game doesn't finish it; having the DLC does
+    built.requests.handleRetroArrEvent('OnDownloadCompleted', { gameId: 7, release: 'BotW Update v1.6.0' });
+    expect(built.store.request(created.json().request.id)!.status).toBe('searching');
+    await built.requests.poll();
+    expect(built.store.request(created.json().request.id)!.status).toBe('searching');
+    fakes.addOns.get(7)!.ownedDlc.add(900);
+    await built.requests.poll();
+    expect(built.store.request(created.json().request.id)!.status).toBe('available');
+    await flush();
+    expect(fakes.discord.map((d) => d.content)).toContainEqual(expect.stringContaining('Expansion Pass of **Breath of the Wild** (2017) for Nintendo Switch is ready to play'));
+  });
+
   it('approves admins and auto-approve users at once, and reuses a game RetroArr already has', async () => {
     await start();
     fakes.games.push({ id: 7, title: 'Final Fantasy VII', igdbId: 427, platformId: 50, status: 2, monitored: false });

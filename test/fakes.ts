@@ -27,7 +27,7 @@ export class Fakes {
   jellyfinDown = false;
   jellyfinLogouts = 0;
 
-  platforms = [
+  platforms: Array<{ id: number; name: string; slug: string; category: string; enabled: boolean; hasAddOns?: boolean }> = [
     { id: 41, name: 'Super Nintendo', slug: 'snes', category: 'Nintendo', enabled: true },
     { id: 50, name: 'PlayStation', slug: 'psx', category: 'Sony', enabled: true },
     { id: 60, name: 'Disabled', slug: 'off', category: 'X', enabled: false },
@@ -36,6 +36,14 @@ export class Fakes {
     [1020, { title: 'Chrono Trigger', year: 1995, platforms: [41, 50] }],
     [427, { title: 'Final Fantasy VII', year: 1997, platforms: [50] }],
   ]);
+  // A console with updates and DLC, and a game on it, for the tests of those
+  addSwitch() {
+    this.platforms.push({ id: 70, name: 'Nintendo Switch', slug: 'switch', category: 'Nintendo', enabled: true, hasAddOns: true });
+    this.catalogue.set(7346, { title: 'Breath of the Wild', year: 2017, platforms: [70] });
+  }
+  // RetroArr's updates and DLC per game: what is wanted (from PUT /games/{id}/addons) and what the library has
+  addOns = new Map<number, { wantLatestUpdate: boolean; wantAllDlc: boolean; dlc: Array<{ igdbId: number | null; title: string }>; updateVersion: string | null; ownedDlc: Set<number>; hasDlcPack: boolean }>();
+  addOnPuts: Array<{ gameId: number; body: Record<string, unknown> }> = [];
   games: FakeGame[] = [];
   nextGameId = 100;
   failAdd: string | null = null;
@@ -151,6 +159,28 @@ export class Fakes {
       if (m) {
         const g = this.games.find((x) => x.id === Number(m![1]));
         return g ? json(g) : json({}, 404);
+      }
+      m = path.match(/^\/games\/(\d+)\/addons$/);
+      if (m) {
+        const id = Number(m[1]);
+        const a = this.addOns.get(id) ?? { wantLatestUpdate: false, wantAllDlc: false, dlc: [], updateVersion: null, ownedDlc: new Set<number>(), hasDlcPack: false };
+        if (method === 'PUT') {
+          this.addOnPuts.push({ gameId: id, body });
+          if (body.wantLatestUpdate !== undefined) a.wantLatestUpdate = body.wantLatestUpdate;
+          if (body.wantAllDlc !== undefined) a.wantAllDlc = body.wantAllDlc;
+          if (body.dlc) a.dlc = body.append ? [...a.dlc, ...body.dlc.filter((d: { igdbId: number }) => !a.dlc.some((x) => x.igdbId === d.igdbId))] : body.dlc;
+          this.addOns.set(id, a);
+        }
+        const g = this.games.find((x) => x.id === id);
+        return json({
+          supported: true,
+          inLibrary: g?.status === 4,
+          wantLatestUpdate: a.wantLatestUpdate,
+          wantAllDlc: a.wantAllDlc,
+          updateVersion: a.updateVersion,
+          hasDlcPack: a.hasDlcPack,
+          dlc: a.dlc.map((d) => ({ ...d, owned: d.igdbId !== null && a.ownedDlc.has(d.igdbId) })),
+        });
       }
       m = path.match(/^\/games\/(\d+)\/monitored$/);
       if (m) {

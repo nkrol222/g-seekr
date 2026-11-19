@@ -8,6 +8,27 @@ export interface RetroArrPlatform {
   enabled: boolean;
   // IGDB's id for the platform (g-seekr asks IGDB itself)
   igdbPlatformId?: number | null;
+  // Its games get updates and DLC as separate downloads (false from an older RetroArr)
+  hasAddOns?: boolean;
+}
+
+// A game's DLC or expansion on IGDB
+export interface DlcInfo {
+  igdbId: number;
+  title: string;
+  year: number | null;
+  kind: string;
+}
+
+// What RetroArr has of a game's updates and DLC, against what is wanted
+export interface RetroArrAddOns {
+  supported: boolean;
+  inLibrary: boolean;
+  wantLatestUpdate: boolean;
+  wantAllDlc: boolean;
+  updateVersion: string | null;
+  hasDlcPack: boolean;
+  dlc: { igdbId: number | null; title: string; owned: boolean }[];
 }
 
 export interface RetroArrLookupGame {
@@ -117,6 +138,8 @@ export interface RetroArrDiscoverDetail {
   fromDeveloper: RetroArrDiscoverGame[];
   // Its series, to link to their collection pages
   seriesRefs: DiscoverOption[];
+  // Its DLC and expansions (from IGDB directly; empty through RetroArr)
+  dlc: DlcInfo[];
 }
 
 function toDiscoverGame(g: Record<string, unknown>): RetroArrDiscoverGame {
@@ -253,6 +276,7 @@ export class RetroArrClient {
       category: typeof p.category === 'string' ? p.category : null,
       enabled: p.enabled !== false,
       igdbPlatformId: typeof p.igdbPlatformId === 'number' ? p.igdbPlatformId : null,
+      hasAddOns: p.hasAddOns === true,
     }));
   }
 
@@ -388,6 +412,7 @@ export class RetroArrClient {
         series: (Array.isArray(d.series) ? d.series : []).map((g) => toDiscoverGame(g as Record<string, unknown>)),
         developer: typeof d.developer === 'string' ? d.developer : null,
         fromDeveloper: (Array.isArray(d.fromDeveloper) ? d.fromDeveloper : []).map((g) => toDiscoverGame(g as Record<string, unknown>)),
+        dlc: [],
         seriesRefs: (Array.isArray(d.seriesRefs) ? d.seriesRefs : []).map((r) => {
           const o = r as Record<string, unknown>;
           return { id: Number(o.id), name: String(o.name ?? '') };
@@ -476,6 +501,31 @@ export class RetroArrClient {
   async recentlyAdded(limit: number): Promise<RetroArrDiscoverGame[]> {
     const res = await this.call<{ games?: Array<Record<string, unknown>> }>('GET', `/discover/library/recent?limit=${limit}`);
     return (res.games ?? []).map(toDiscoverGame);
+  }
+
+  async getAddOns(id: number): Promise<RetroArrAddOns> {
+    const a = await this.call<Record<string, unknown>>('GET', `/games/${id}/addons`);
+    return {
+      supported: a.supported === true,
+      inLibrary: a.inLibrary === true,
+      wantLatestUpdate: a.wantLatestUpdate === true,
+      wantAllDlc: a.wantAllDlc === true,
+      updateVersion: typeof a.updateVersion === 'string' ? a.updateVersion : null,
+      hasDlcPack: a.hasDlcPack === true,
+      dlc: (Array.isArray(a.dlc) ? a.dlc : []).map((d) => {
+        const o = d as Record<string, unknown>;
+        return { igdbId: typeof o.igdbId === 'number' ? o.igdbId : null, title: String(o.title ?? ''), owned: o.owned === true };
+      }),
+    };
+  }
+
+  // Adds to what RetroArr wants of the game's updates and DLC: never turns off what it wanted already. search: look
+  // for them now (the game is in the library)
+  async addAddOns(id: number, wants: { latestUpdate: boolean; allDlc: boolean; dlc: { igdbId: number | null; title: string }[] }, search: boolean): Promise<void> {
+    const body: Record<string, unknown> = { dlc: wants.dlc, append: true, search };
+    if (wants.latestUpdate) body.wantLatestUpdate = true;
+    if (wants.allDlc) body.wantAllDlc = true;
+    await this.call('PUT', `/games/${id}/addons`, body, 180_000);
   }
 
   // Searches the indexers and grabs a release that scores high enough. Can take a while.

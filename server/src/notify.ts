@@ -10,7 +10,10 @@ export class Notifier {
   ) {}
 
   private label(r: GameRequest): string {
-    return `**${r.title}**${r.year ? ` (${r.year})` : ''} for ${r.platformName}`;
+    const game = `**${r.title}**${r.year ? ` (${r.year})` : ''} for ${r.platformName}`;
+    if (r.kind !== 'addons') return game;
+    const what = [r.addOns.latestUpdate ? 'the latest update' : '', r.addOns.allDlc ? 'all DLC' : '', ...r.addOns.dlc.map((d) => d.title)].filter(Boolean);
+    return `${what.length > 3 ? `${what.length} updates and DLC` : what.join(', ')} of ${game}`;
   }
 
   async requestCreated(r: GameRequest): Promise<void> {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ISSUE_KIND_LABEL, ISSUE_STATUS_LABEL, type GameRequest, type Issue, type Me, type RequestStatus, versionLabel } from '../api';
+import { addOnsLabel, api, ISSUE_KIND_LABEL, ISSUE_STATUS_LABEL, type GameRequest, type Issue, type Me, type RequestStatus, versionLabel } from '../api';
 import { ProgressBar, ReportDialog, useProgress } from './Live';
 import { ago, Alert, Avatar, Icon, Poster, rommLink, StatusBadge, statusDetail, when } from './shared';
 import { RequestTimeline, StepLine } from './Timeline';
@@ -145,6 +145,8 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
                 <span className="meta">
                   {r.year ?? ''} {r.year ? '·' : ''} {r.platformName}
                   {versionLabel(r) && <span className="version-tag"> · {versionLabel(r)}</span>}
+                  {r.kind === 'addons' && <span className="version-tag"> · updates and DLC: {addOnsLabel(r.addOns)}</span>}
+                  {r.kind !== 'addons' && addOnsLabel(r.addOns) && <span className="version-tag"> · with {addOnsLabel(r.addOns)}</span>}
                 </span>
                 <h3>{r.title}</h3>
                 <dl className="facts">

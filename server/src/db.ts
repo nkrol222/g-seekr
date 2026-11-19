@@ -206,6 +206,19 @@ const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX ux_requests_open ON requests(igdb_id, platform_id, region, variant)
     WHERE status IN ('pending', 'approved', 'searching', 'downloading', 'available');
   `,
+  // 12: updates and DLC. A game request can ask for them too; an add-on request asks for them for a game the library
+  // has. One open request of each kind per game, platform and version; an add-on request is done once it is in.
+  `
+  ALTER TABLE requests ADD COLUMN kind TEXT NOT NULL DEFAULT 'game';
+  ALTER TABLE requests ADD COLUMN latest_update INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE requests ADD COLUMN all_dlc INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE requests ADD COLUMN dlc TEXT NOT NULL DEFAULT '[]';
+  DROP INDEX ux_requests_open;
+  CREATE UNIQUE INDEX ux_requests_open ON requests(igdb_id, platform_id, region, variant)
+    WHERE kind = 'game' AND status IN ('pending', 'approved', 'searching', 'downloading', 'available');
+  CREATE UNIQUE INDEX ux_requests_addons_open ON requests(igdb_id, platform_id, region, variant)
+    WHERE kind = 'addons' AND status IN ('pending', 'approved', 'searching', 'downloading');
+  `,
 ];
 
 export function openDb(path: string): Db {
