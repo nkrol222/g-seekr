@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../server/src/db.js';
-import { entryMatches, parseVersion, versionLabel } from '../server/src/versions.js';
+import { entryMatches, parseAddOns, parseVersion, versionLabel } from '../server/src/versions.js';
 
 describe('versions', () => {
   it('reads a version from a request body', () => {
@@ -34,5 +34,16 @@ describe('versions', () => {
     insert.run('Japan', '');
     insert.run('Japan', 'en-translation');
     expect(() => insert.run('Japan', '')).toThrow(/UNIQUE/);
+  });
+
+  it('reads updates and DLC from a request body', () => {
+    expect(parseAddOns(undefined)).toEqual({ latestUpdate: false, allDlc: false, dlc: [] });
+    expect(parseAddOns({ latestUpdate: true, dlc: [{ igdbId: 9, title: ' Bonus ' }, { igdbId: 9, title: 'Bonus' }, { title: 'No id' }] })).toEqual({
+      latestUpdate: true,
+      allDlc: false,
+      dlc: [{ igdbId: 9, title: 'Bonus' }, { igdbId: null, title: 'No id' }],
+    });
+    expect(parseAddOns({ dlc: [{ igdbId: 1 }] })).toMatch(/name/);
+    expect(parseAddOns({ dlc: 'all' })).toMatch(/list/);
   });
 });

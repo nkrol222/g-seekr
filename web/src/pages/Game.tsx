@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, REGIONS, STATUS_LABEL, versionLabel, type GamePage as Page, type Platform, type RequestStatus, type Version } from '../api';
+import { addOnsLabel, api, NO_ADDONS, REGIONS, STATUS_LABEL, versionLabel, type AddOns, type Dlc, type GamePage as Page, type Platform, type RequestStatus, type Version } from '../api';
 import { Alert, Icon, Poster, rommGameUrl, StatusBadge } from './shared';
 import { cardStatus, TitleCard } from './Titles';
 
@@ -13,6 +13,9 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
   // The platform whose "Another version" picker is open, and what's picked in it
   const [picking, setPicking] = useState<number | null>(null);
   const [picked, setPicked] = useState<Version>({ region: '', variant: '', latestRevision: false });
+  // Updates and DLC picked in the version picker, or for a game the library has (addOnsFor: that platform's form)
+  const [wanted, setWanted] = useState<AddOns>({ ...NO_ADDONS, latestUpdate: true });
+  const [addOnsFor, setAddOnsFor] = useState<number | null>(null);
   const [showStory, setShowStory] = useState(false);
   const [trailer, setTrailer] = useState<string | null>(null);
   const [mine, setMine] = useState<{ liked: boolean; dismissed: boolean }>({ liked: false, dismissed: false });
@@ -41,20 +44,37 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
     };
   }, [igdbId]);
 
-  const request = async (platformId: number, version?: Version) => {
+  const request = async (platformId: number, version?: Version, addOns?: AddOns) => {
     if (!page) return;
     setPending(platformId);
     setError(null);
     setNotice(null);
     try {
-      const { request } = await api.request(igdbId, platformId, version);
-      const which = versionLabel(request);
+      const { request } = await api.request(igdbId, platformId, version, addOns);
+      const which = [versionLabel(request), addOnsLabel(request.addOns)].filter(Boolean).join(' · ');
       setNotice(`Requested for ${request.platformName}${which ? ` (${which})` : ''}: ${STATUS_LABEL[request.status]}.`);
       setPage({
         ...page,
         game: { ...page.game, requests: [...page.game.requests, { id: request.id, platformId, status: request.status, region: request.region ?? '', variant: request.variant ?? '' }] },
       });
       setPicking(null);
+      onRequested();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  // Updates and DLC for a game the library has
+  const requestAddOns = async (platformId: number) => {
+    setPending(platformId);
+    setError(null);
+    setNotice(null);
+    try {
+      const { request } = await api.request(igdbId, platformId, undefined, wanted, 'addons');
+      setNotice(`Requested for ${request.platformName} (${addOnsLabel(request.addOns)}): ${STATUS_LABEL[request.status]}.`);
+      setAddOnsFor(null);
       onRequested();
     } catch (err) {
       setError((err as Error).message);
@@ -195,7 +215,13 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
                         ) : s ? (
                           <StatusBadge status={s} />
                         ) : (
-                          <button type="button" className="btn primary sm" onClick={() => request(pid)} disabled={pending !== null}>
+                          <button
+                            type="button"
+                            className="btn primary sm"
+                            onClick={() => request(pid, undefined, platform.hasAddOns ? { ...NO_ADDONS, latestUpdate: true } : undefined)}
+                            disabled={pending !== null}
+                            title={platform.hasAddOns ? 'With its latest update' : undefined}
+                          >
                             <Icon name="download" />
                             {pending === pid ? 'Requesting…' : 'Request'}
                           </button>
@@ -206,11 +232,27 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
                           aria-expanded={picking === pid}
                           onClick={() => {
                             setPicking(picking === pid ? null : pid);
+                            setAddOnsFor(null);
                             setPicked({ region: '', variant: '', latestRevision: false });
+                            setWanted({ ...NO_ADDONS, latestUpdate: true });
                           }}
                         >
-                          {picking === pid ? 'Close' : have.length > 0 || s ? 'Another version…' : 'Choose a version…'}
+                          {picking === pid ? 'Close' : have.length > 0 || s ? 'Another version…' : platform.hasAddOns ? 'Version, update and DLC…' : 'Choose a version…'}
                         </button>
+                        {owned && platform.hasAddOns && (
+                          <button
+                            type="button"
+                            className="btn ghost sm"
+                            aria-expanded={addOnsFor === pid}
+                            onClick={() => {
+                              setAddOnsFor(addOnsFor === pid ? null : pid);
+                              setPicking(null);
+                              setWanted(NO_ADDONS);
+                            }}
+                          >
+                            {addOnsFor === pid ? 'Close' : 'Updates and DLC…'}
+                          </button>
+                        )}
                       </div>
                       {have.length > 0 && (
                         <p className="versions muted">
@@ -230,7 +272,7 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
                           className="version-picker"
                           onSubmit={(e) => {
                             e.preventDefault();
-                            void request(pid, picked);
+                            void request(pid, picked, platform.hasAddOns ? wanted : undefined);
                           }}
                         >
                           <label>
@@ -259,8 +301,23 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
                           <p className="muted small">
                             {have.length > 0 ? 'A different version is added beside the one you have.' : 'Leave it all as it is for the usual version.'}
                           </p>
+                          {platform.hasAddOns && <AddOnFields dlc={page.dlc ?? []} value={wanted} onChange={setWanted} />}
                           <button type="submit" className="btn primary sm" disabled={pending !== null}>
                             {pending === pid ? 'Requesting…' : versionLabel(picked) ? `Request ${versionLabel(picked)}` : 'Request'}
+                          </button>
+                        </form>
+                      )}
+                      {addOnsFor === pid && (
+                        <form
+                          className="version-picker"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            void requestAddOns(pid);
+                          }}
+                        >
+                          <AddOnFields dlc={page.dlc ?? []} value={wanted} onChange={setWanted} />
+                          <button type="submit" className="btn primary sm" disabled={pending !== null || !addOnsLabel(wanted)}>
+                            {pending === pid ? 'Requesting…' : addOnsLabel(wanted) ? `Request ${addOnsLabel(wanted)}` : 'Pick what you want'}
                           </button>
                         </form>
                       )}
@@ -383,5 +440,43 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
         </section>
       )}
     </article>
+  );
+}
+
+// The latest update, every DLC in one pack, or DLC picked from IGDB's list
+function AddOnFields({ dlc, value, onChange }: { dlc: Dlc[]; value: AddOns; onChange: (v: AddOns) => void }) {
+  const picked = (d: Dlc) => value.dlc.some((x) => x.igdbId === d.igdbId);
+  const toggle = (d: Dlc) =>
+    onChange({ ...value, dlc: picked(d) ? value.dlc.filter((x) => x.igdbId !== d.igdbId) : [...value.dlc, { igdbId: d.igdbId, title: d.title }] });
+  return (
+    <fieldset className="addon-fields">
+      <legend>Updates and DLC</legend>
+      <label className="check">
+        <input type="checkbox" checked={value.latestUpdate} onChange={(e) => onChange({ ...value, latestUpdate: e.target.checked })} />
+        Latest update (and newer ones as they come out)
+      </label>
+      {dlc.length > 0 ? (
+        <>
+          <label className="check">
+            <input type="checkbox" checked={value.allDlc} onChange={(e) => onChange({ ...value, allDlc: e.target.checked })} />
+            All DLC in one go
+          </label>
+          {!value.allDlc && (
+            <div className="dlc-list">
+              {dlc.map((d) => (
+                <label key={d.igdbId} className="check">
+                  <input type="checkbox" checked={picked(d)} onChange={() => toggle(d)} />
+                  {d.title}
+                  {d.year ? <span className="muted"> ({d.year})</span> : null}
+                  {d.kind !== 'DLC' ? <span className="muted"> · {d.kind.toLowerCase()}</span> : null}
+                </label>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="muted small">IGDB lists no DLC for it.</p>
+      )}
+    </fieldset>
   );
 }

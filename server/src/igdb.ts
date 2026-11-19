@@ -50,6 +50,8 @@ interface IgdbDetail extends IgdbCard {
   release_dates?: { platform?: { id: number; name: string }; date?: number; region?: number; release_region?: { region?: string } }[];
   franchises?: { id: number; name: string }[];
   similar_games?: number[];
+  dlcs?: { id: number; name: string; first_release_date?: number }[];
+  expansions?: { id: number; name: string; first_release_date?: number }[];
 }
 
 type Size = 'cover_big' | '1080p' | 'screenshot_big';
@@ -343,7 +345,8 @@ export class DirectIgdbRetroArrClient extends RetroArrClient {
       `${CARD_FIELDS}, storyline, screenshots.image_id, artworks.image_id, videos.video_id, videos.name, themes.id, themes.name, ` +
       'game_modes.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher, ' +
       'release_dates.platform.id, release_dates.platform.name, release_dates.date, release_dates.region, release_dates.release_region.region, ' +
-      'franchises.id, franchises.name, similar_games, involved_companies.company.id';
+      'franchises.id, franchises.name, similar_games, involved_companies.company.id, ' +
+      'dlcs.id, dlcs.name, dlcs.first_release_date, expansions.id, expansions.name, expansions.first_release_date';
     const [g] = await this.q<IgdbDetail>(`game:${igdbId}`, 'games', `fields ${fields}; where id = ${igdbId};`);
     if (!g) return null;
     const { byIgdb } = await this.platformsByIgdb();
@@ -400,6 +403,11 @@ export class DirectIgdbRetroArrClient extends RetroArrClient {
       developer: developer?.company?.name ?? null,
       fromDeveloper: byDeveloper.map(card),
       seriesRefs: (g.franchises ?? []).filter((f) => f.id > 0).map((f) => ({ id: f.id, name: f.name })),
+      // Oldest first, an expansion listed under both once
+      dlc: [...(g.dlcs ?? []).map((d) => ({ d, kind: 'DLC' })), ...(g.expansions ?? []).map((d) => ({ d, kind: 'Expansion' }))]
+        .filter((x, i, all) => x.d.id > 0 && x.d.name && all.findIndex((y) => y.d.id === x.d.id) === i)
+        .sort((a, b) => (a.d.first_release_date ?? Infinity) - (b.d.first_release_date ?? Infinity) || a.d.name.localeCompare(b.d.name))
+        .map(({ d, kind }) => ({ igdbId: d.id, title: d.name, year: d.first_release_date ? new Date(d.first_release_date * 1000).getUTCFullYear() : null, kind })),
     };
     await this.withLibrary([detail.game, ...detail.similar, ...detail.series, ...detail.fromDeveloper]);
     return detail;

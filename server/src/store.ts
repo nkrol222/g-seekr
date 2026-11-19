@@ -4,6 +4,35 @@ export type RequestStatus = 'pending' | 'approved' | 'searching' | 'downloading'
 export const OPEN_STATUSES: RequestStatus[] = ['pending', 'approved', 'searching', 'downloading', 'available'];
 // Handed to RetroArr and not finished: the poller follows these
 export const TRACKED_STATUSES: RequestStatus[] = ['approved', 'searching', 'downloading'];
+// An add-on request is open until what it asked for is in
+export const OPEN_ADDON_STATUSES: RequestStatus[] = ['pending', 'approved', 'searching', 'downloading'];
+
+export type RequestKind = 'game' | 'addons';
+export interface WantedDlc {
+  igdbId: number | null;
+  title: string;
+}
+// Updates and DLC asked for with a game, or for a game the library has
+export interface AddOns {
+  latestUpdate: boolean;
+  allDlc: boolean;
+  dlc: WantedDlc[];
+}
+export const NO_ADDONS: AddOns = { latestUpdate: false, allDlc: false, dlc: [] };
+export const hasAddOns = (a: AddOns) => a.latestUpdate || a.allDlc || a.dlc.length > 0;
+
+function parseDlc(raw: unknown): WantedDlc[] {
+  try {
+    const list = JSON.parse(String(raw ?? '[]')) as unknown;
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((d): d is { igdbId?: unknown; title?: unknown } => typeof d === 'object' && d !== null)
+      .map((d) => ({ igdbId: typeof d.igdbId === 'number' ? d.igdbId : null, title: String(d.title ?? '') }))
+      .filter((d) => d.title);
+  } catch {
+    return [];
+  }
+}
 
 export interface User {
   id: number;
@@ -54,6 +83,9 @@ export interface GameRequest {
   region: string;
   variant: string;
   latestRevision: boolean;
+  // 'addons': updates and DLC for a game the library has
+  kind: RequestKind;
+  addOns: AddOns;
   createdAt: string;
   updatedAt: string;
 }
@@ -124,6 +156,8 @@ const toRequest = (r: Row): GameRequest => ({
   region: String(r.region ?? ''),
   variant: String(r.variant ?? ''),
   latestRevision: Number(r.latest_revision ?? 0) === 1,
+  kind: r.kind === 'addons' ? 'addons' : 'game',
+  addOns: { latestUpdate: Number(r.latest_update ?? 0) === 1, allDlc: Number(r.all_dlc ?? 0) === 1, dlc: parseDlc(r.dlc) },
   createdAt: String(r.created_at),
   updatedAt: String(r.updated_at),
 });
@@ -311,15 +345,20 @@ export class Store {
     year: number | null;
     coverUrl: string | null;
     version?: { region: string; variant: string; latestRevision: boolean };
+    kind?: RequestKind;
+    addOns?: AddOns;
   }): GameRequest {
     const now = this.ts();
     const v = r.version ?? { region: '', variant: '', latestRevision: false };
+    const a = r.addOns ?? NO_ADDONS;
     const res = this.db
       .prepare(
-        `INSERT INTO requests (user_id, igdb_id, platform_id, platform_name, title, year, cover_url, status, region, variant, latest_revision, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+        `INSERT INTO requests (user_id, igdb_id, platform_id, platform_name, title, year, cover_url, status, region, variant, latest_revision,
+           kind, latest_update, all_dlc, dlc, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(r.userId, r.igdbId, r.platformId, r.platformName, r.title, r.year, r.coverUrl, v.region, v.variant, v.latestRevision ? 1 : 0, now, now);
+      .run(r.userId, r.igdbId, r.platformId, r.platformName, r.title, r.year, r.coverUrl, v.region, v.variant, v.latestRevision ? 1 : 0,
+        r.kind ?? 'game', a.latestUpdate ? 1 : 0, a.allDlc ? 1 : 0, JSON.stringify(a.dlc), now, now);
     const id = Number(res.lastInsertRowid);
     this.addRequestEvent(id, 'requested', { actorId: r.userId });
     return this.request(id)!;
@@ -331,10 +370,18 @@ export class Store {
   }
 
   // The open request for that version (the default one when none is given)
-  openRequestFor(igdbId: number, platformId: number, version: { region: string; variant: string } = { region: '', variant: '' }): GameRequest | null {
+  openRequestFor(
+    igdbId: number,
+    platformId: number,
+    version: { region: string; variant: string } = { region: '', variant: '' },
+    kind: RequestKind = 'game',
+  ): GameRequest | null {
+    const statuses = kind === 'addons' ? OPEN_ADDON_STATUSES : OPEN_STATUSES;
     const r = this.db
-      .prepare(`${REQUEST_SELECT} WHERE r.igdb_id = ? AND r.platform_id = ? AND r.region = ? AND r.variant = ? AND r.status IN (${OPEN_STATUSES.map(() => '?').join(',')})`)
-      .get(igdbId, platformId, version.region, version.variant, ...OPEN_STATUSES) as Row | undefined;
+      .prepare(
+        `${REQUEST_SELECT} WHERE r.igdb_id = ? AND r.platform_id = ? AND r.region = ? AND r.variant = ? AND r.kind = ? AND r.status IN (${statuses.map(() => '?').join(',')})`,
+      )
+      .get(igdbId, platformId, version.region, version.variant, kind, ...statuses) as Row | undefined;
     return r ? toRequest(r) : null;
   }
 
@@ -342,7 +389,7 @@ export class Store {
     if (igdbIds.length === 0) return [];
     return (
       this.db
-        .prepare(`${REQUEST_SELECT} WHERE r.igdb_id IN (${igdbIds.map(() => '?').join(',')}) AND r.status IN (${OPEN_STATUSES.map(() => '?').join(',')})`)
+        .prepare(`${REQUEST_SELECT} WHERE r.kind = 'game' AND r.igdb_id IN (${igdbIds.map(() => '?').join(',')}) AND r.status IN (${OPEN_STATUSES.map(() => '?').join(',')})`)
         .all(...igdbIds, ...OPEN_STATUSES) as Row[]
     ).map(toRequest);
   }

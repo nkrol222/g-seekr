@@ -2445,3 +2445,26 @@ table.table {
 .version-tag {
   opacity: 0.85;
 }
+
+/* Updates and DLC in the request picker */
+.addon-fields {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.addon-fields legend {
+  padding: 0 4px;
+  font-size: 0.85rem;
+}
+.dlc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 14rem;
+  overflow-y: auto;
+  padding-left: 1.4rem;
+}

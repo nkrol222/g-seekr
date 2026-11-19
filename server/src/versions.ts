@@ -1,3 +1,5 @@
+import type { AddOns } from './store.js';
+
 // Which version of a game a request is for: a region, the English fan translation, the latest revision. The default
 // (any region, the release itself) is what every request was before. Matches RetroArr's entry keys: Region and Variant.
 
@@ -36,4 +38,20 @@ export function entryMatches(v: Pick<Version, 'region' | 'variant'>, entry: { re
     .split(',')
     .map((r) => r.trim().toLowerCase())
     .some((r) => r === v.region.toLowerCase() || (v.region === 'USA' && (r === 'us' || r === 'north america')));
+}
+
+// Updates and DLC from a request body: { latestUpdate, allDlc, dlc: [{ igdbId, title }] }; a string says what's wrong
+export function parseAddOns(body: { latestUpdate?: unknown; allDlc?: unknown; dlc?: unknown } | undefined): AddOns | string {
+  const dlc: AddOns['dlc'] = [];
+  if (body?.dlc !== undefined && body.dlc !== null) {
+    if (!Array.isArray(body.dlc) || body.dlc.length > 100) return 'dlc: a list of at most 100.';
+    for (const d of body.dlc as unknown[]) {
+      const o = (typeof d === 'object' && d !== null ? d : {}) as { igdbId?: unknown; title?: unknown };
+      const title = typeof o.title === 'string' ? o.title.trim() : '';
+      if (!title || title.length > 300) return 'Each DLC needs a name of at most 300 characters.';
+      const igdbId = typeof o.igdbId === 'number' && Number.isInteger(o.igdbId) && o.igdbId > 0 ? o.igdbId : null;
+      if (!dlc.some((x) => (igdbId !== null ? x.igdbId === igdbId : x.title.toLowerCase() === title.toLowerCase()))) dlc.push({ igdbId, title });
+    }
+  }
+  return { latestUpdate: body?.latestUpdate === true, allDlc: body?.allDlc === true, dlc };
 }

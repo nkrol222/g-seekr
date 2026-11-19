@@ -48,6 +48,8 @@ function fakes() {
               { platform: { id: 7, name: 'PlayStation' }, date: 941932800 },
             ],
             franchises: [{ id: 5, name: 'Chrono' }],
+            dlcs: [{ id: 91, name: 'Bonus Dungeon', first_release_date: 900000000 }, { id: 90, name: 'Early Pack', first_release_date: 800000000 }],
+            expansions: [{ id: 91, name: 'Bonus Dungeon', first_release_date: 900000000 }],
             involved_companies: [{ company: { id: 70, name: 'Square' }, developer: true, publisher: true }],
             videos: [{ name: 'Trailer', video_id: 'abcdefgh' }, { name: 'bad', video_id: '<script>' }],
           },
@@ -155,6 +157,10 @@ describe('IGDB, asked directly', () => {
     expect(d!.videos).toEqual([{ name: 'Trailer', youtubeId: 'abcdefgh' }]);
     expect(d!.developer).toBe('Square');
     expect(d!.seriesRefs).toEqual([{ id: 5, name: 'Chrono' }]);
+    expect(d!.dlc).toEqual([
+      { igdbId: 90, title: 'Early Pack', year: 1995, kind: 'DLC' },
+      { igdbId: 91, title: 'Bonus Dungeon', year: 1998, kind: 'DLC' },
+    ]);
     expect(d!.game.library[0]!.rommId).toBe(55);
     const series = c.state.igdbCalls.find((x) => x.body.includes('where franchises = (5)'))!;
     expect(series.body).toContain('(themes = null | themes != (42))');

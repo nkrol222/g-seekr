@@ -1,4 +1,4 @@
-import { parseVersion } from './versions.js';
+import { parseAddOns, parseVersion } from './versions.js';
 import { DirectIgdbRetroArrClient, IgdbError } from './igdb.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -260,7 +260,9 @@ export async function buildApp(deps: AppDeps) {
 
   // ---- browsing ----
 
-  app.get('/api/platforms', async () => (await requests.platforms()).map(({ id, name, slug, category }) => ({ id, name, slug, category })));
+  app.get('/api/platforms', async () =>
+    (await requests.platforms()).map(({ id, name, slug, category, hasAddOns }) => ({ id, name, slug, category, hasAddOns: hasAddOns === true })),
+  );
 
   app.get<{ Querystring: { q?: string } }>('/api/search', async (req, reply) => {
     const q = (req.query.q ?? '').trim();
@@ -531,7 +533,19 @@ export async function buildApp(deps: AppDeps) {
 
   app.get<{ Params: { id: string } }>('/api/requests/:id/timeline', async (req) => requests.timeline(req.user!, idParam(req.params.id)));
 
-  app.post<{ Body: { igdbId?: unknown; platformId?: unknown; region?: unknown; variant?: unknown; latestRevision?: unknown } }>('/api/requests', async (req, reply) => {
+  app.post<{
+    Body: {
+      igdbId?: unknown;
+      platformId?: unknown;
+      region?: unknown;
+      variant?: unknown;
+      latestRevision?: unknown;
+      kind?: unknown;
+      latestUpdate?: unknown;
+      allDlc?: unknown;
+      dlc?: unknown;
+    };
+  }>('/api/requests', async (req, reply) => {
     const igdbId = Number(req.body?.igdbId);
     const platformId = Number(req.body?.platformId);
     if (!Number.isInteger(igdbId) || igdbId <= 0 || !Number.isInteger(platformId) || platformId <= 0) {
@@ -540,7 +554,11 @@ export async function buildApp(deps: AppDeps) {
     // Which version: a region, the English translation, the latest revision (none: any, as before)
     const version = parseVersion(req.body);
     if (typeof version === 'string') return reply.code(400).send({ error: version });
-    const created = await requests.create(req.user!, igdbId, platformId, version);
+    // Updates and DLC, with the game or (kind addons) for a game the library has
+    const addOns = parseAddOns(req.body);
+    if (typeof addOns === 'string') return reply.code(400).send({ error: addOns });
+    const kind = req.body?.kind === 'addons' ? 'addons' : 'game';
+    const created = await requests.create(req.user!, igdbId, platformId, version, addOns, kind);
     recommend.forget(req.user!.id);
     return reply.code(201).send({ request: created });
   });
