@@ -4,17 +4,16 @@ import { Login } from './pages/Login';
 import { Discover } from './pages/Discover';
 import { GameGrid, Search } from './pages/Search';
 import { GamePage } from './pages/Game';
-import { ForYou, RommLinkDialog } from './pages/ForYou';
+import { ForYou } from './pages/ForYou';
 import { isFilter, Requests } from './pages/Requests';
-import { AdminUsers } from './pages/AdminUsers';
-import { AdminTasks } from './pages/AdminTasks';
+import { ADMIN_SETTINGS_TABS, isSettingsTab, Settings } from './pages/Settings';
 import { Issues } from './pages/Issues';
 import { Collections, CollectionView } from './pages/Collections';
 import { ImportReview, ImportStart } from './pages/Imports';
 import { RomHacks } from './pages/RomHacks';
 import { Avatar, Icon, Mark, Wordmark, type IconName } from './pages/shared';
 
-type View = 'discover' | 'for-you' | 'romhacks' | 'browse' | 'search' | 'game' | 'collections' | 'collection' | 'import' | 'import-review' | 'requests' | 'issues' | 'users' | 'tasks';
+type View = 'discover' | 'for-you' | 'romhacks' | 'browse' | 'search' | 'game' | 'collections' | 'collection' | 'import' | 'import-review' | 'requests' | 'issues' | 'settings';
 
 interface Route {
   view: View;
@@ -44,7 +43,13 @@ const parseHash = (): Route => {
     if (imp[1]) params.set('id', imp[1]);
     return { view: imp[1] ? 'import-review' : 'import', params };
   }
-  const view = (['for-you', 'romhacks', 'browse', 'search', 'collections', 'requests', 'issues', 'users', 'tasks'] as const).find((v) => v === path) ?? 'discover';
+  // #/settings/content; #/users and #/tasks were pages of their own before Settings
+  const settings = path.match(/^settings(?:\/([a-z]+))?$/);
+  if (settings || path === 'users' || path === 'tasks') {
+    params.set('tab', settings ? (settings[1] ?? 'account') : path);
+    return { view: 'settings', params };
+  }
+  const view = (['for-you', 'romhacks', 'browse', 'search', 'collections', 'requests', 'issues'] as const).find((v) => v === path) ?? 'discover';
   // #/mine and #/queue were the old requests pages
   return { view: path === 'mine' || path === 'queue' ? 'requests' : view, params };
 };
@@ -83,7 +88,10 @@ export function App() {
   if (!me) return <Login onSignedIn={(m) => (setMe(m), void refreshMe())} />;
 
   const admin = me.user.isAdmin;
-  const view = !admin && (route.view === 'users' || route.view === 'tasks' || route.view === 'import' || route.view === 'import-review') ? 'discover' : route.view;
+  // Admin pages a non-admin opened by their address: Discover, or their own Settings (the server refuses the data anyway)
+  const view = !admin && (route.view === 'import' || route.view === 'import-review') ? 'discover' : route.view;
+  const tabParam = route.params.get('tab') ?? undefined;
+  const settingsTab = isSettingsTab(tabParam) && (admin || !ADMIN_SETTINGS_TABS.has(tabParam)) ? tabParam : 'account';
   const num = (k: string) => Number(route.params.get(k)) || null;
   const filter = route.params.get('filter');
 
@@ -112,11 +120,10 @@ export function App() {
       )}
       {view === 'import' && <ImportStart key={route.params.toString()} listId={num('list')} platformId={num('platform')} />}
       {view === 'import-review' && <ImportReview id={num('id')!} />}
-      {view === 'game' && <GamePage igdbId={Number(route.params.get('id'))} rommUrl={me.rommUrl} onRequested={refreshMe} />}
+      {view === 'game' && <GamePage igdbId={Number(route.params.get('id'))} rommUrl={me.rommUrl} prefs={me.prefs} onRequested={refreshMe} />}
       {view === 'requests' && <Requests me={me} filter={isFilter(filter) ? filter : admin ? 'open' : 'all'} onChanged={refreshMe} />}
       {view === 'issues' && <Issues me={me} onChanged={refreshMe} />}
-      {view === 'users' && <AdminUsers me={me} />}
-      {view === 'tasks' && <AdminTasks />}
+      {view === 'settings' && <Settings me={me} tab={settingsTab} onChanged={refreshMe} />}
     </Shell>
   );
 }
@@ -140,7 +147,6 @@ function Shell({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
-  const [rommOpen, setRommOpen] = useState(false);
   const [text, setText] = useState(query);
   const userRef = useRef<HTMLDivElement>(null);
 
@@ -168,12 +174,7 @@ function Shell({
     { id: 'romhacks', label: 'ROM hacks', icon: 'wrench', href: '#/romhacks' },
     { id: 'requests', label: me.user.isAdmin ? 'Requests' : 'My requests', icon: 'clock', href: '#/requests', count: me.user.isAdmin ? pending : 0 },
     { id: 'issues', label: me.user.isAdmin ? 'Issues' : 'My problems', icon: 'flag', href: '#/issues', count: me.user.isAdmin ? openIssues : 0 },
-    ...(me.user.isAdmin
-      ? [
-          { id: 'users' as const, label: 'Users', icon: 'users' as const, href: '#/users' },
-          { id: 'tasks' as const, label: 'Tasks', icon: 'refresh' as const, href: '#/tasks' },
-        ]
-      : []),
+    { id: 'settings', label: 'Settings', icon: 'cog', href: '#/settings' },
   ];
 
   return (
@@ -225,17 +226,9 @@ function Shell({
                     <small>{me.user.isAdmin ? 'Admin' : me.user.autoApprove ? 'Auto-approved' : 'User'}</small>
                   </span>
                 </div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="btn ghost"
-                  onClick={() => {
-                    setUserOpen(false);
-                    setRommOpen(true);
-                  }}
-                >
-                  <Icon name="play" /> RomM link
-                </button>
+                <a role="menuitem" className="btn ghost" href="#/settings/account" onClick={() => setUserOpen(false)}>
+                  <Icon name="cog" /> Settings
+                </a>
                 <button
                   type="button"
                   role="menuitem"
@@ -252,7 +245,6 @@ function Shell({
           </div>
         </header>
         <main className="content">{children}</main>
-        {rommOpen && <RommLinkDialog onClose={() => setRommOpen(false)} onChanged={() => undefined} />}
       </div>
     </>
   );

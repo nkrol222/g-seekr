@@ -285,9 +285,56 @@ export class Store {
     return new Set((this.db.prepare('SELECT igdb_id FROM dismissed WHERE user_id = ?').all(userId) as Row[]).map((r) => Number(r.igdb_id)));
   }
 
-  setDismissed(userId: number, igdbId: number, dismissed: boolean): void {
-    if (dismissed) this.db.prepare('INSERT OR IGNORE INTO dismissed (user_id, igdb_id, created_at) VALUES (?, ?, ?)').run(userId, igdbId, this.ts());
+  setDismissed(userId: number, igdbId: number, dismissed: boolean, title = ''): void {
+    if (dismissed)
+      this.db.prepare('INSERT OR IGNORE INTO dismissed (user_id, igdb_id, title, created_at) VALUES (?, ?, ?, ?)').run(userId, igdbId, title, this.ts());
     else this.db.prepare('DELETE FROM dismissed WHERE user_id = ? AND igdb_id = ?').run(userId, igdbId);
+  }
+
+  // The "not interested" games with their titles, newest first (Settings → Recommendations)
+  dismissedList(userId: number): { igdbId: number; title: string; createdAt: string }[] {
+    return (this.db.prepare('SELECT igdb_id, title, created_at FROM dismissed WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Row[]).map((r) => ({
+      igdbId: Number(r.igdb_id),
+      title: String(r.title),
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  setDismissedTitle(userId: number, igdbId: number, title: string): void {
+    this.db.prepare('UPDATE dismissed SET title = ? WHERE user_id = ? AND igdb_id = ?').run(title, userId, igdbId);
+  }
+
+  // ---- settings: what an admin changed in the UI, and each user's request preferences ----
+
+  savedSettings(): Map<string, string> {
+    return new Map((this.db.prepare('SELECT key, value FROM settings').all() as Row[]).map((r) => [String(r.key), String(r.value)]));
+  }
+
+  saveSetting(key: string, value: string | null, by: number | null): void {
+    if (value === null) this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+    else
+      this.db
+        .prepare('INSERT INTO settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by')
+        .run(key, value, this.ts(), by);
+  }
+
+  userPrefs(userId: number): { platforms: number[]; region: string } {
+    const r = this.db.prepare('SELECT platforms, region FROM user_prefs WHERE user_id = ?').get(userId) as Row | undefined;
+    if (!r) return { platforms: [], region: '' };
+    let platforms: number[] = [];
+    try {
+      const parsed = JSON.parse(String(r.platforms)) as unknown;
+      if (Array.isArray(parsed)) platforms = parsed.filter((n): n is number => Number.isInteger(n) && n > 0);
+    } catch {
+      platforms = [];
+    }
+    return { platforms, region: String(r.region) };
+  }
+
+  saveUserPrefs(userId: number, prefs: { platforms: number[]; region: string }): void {
+    this.db
+      .prepare('INSERT INTO user_prefs (user_id, platforms, region) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET platforms = excluded.platforms, region = excluded.region')
+      .run(userId, JSON.stringify(prefs.platforms), prefs.region);
   }
 
   rommLink(userId: number): { token: string; rommUsername: string; linkedAt: string; lastError: string | null } | null {

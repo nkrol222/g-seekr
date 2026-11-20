@@ -27,10 +27,12 @@ export function useRecommendations() {
   }, []);
   useEffect(load, [load]);
   const dismiss = async (igdbId: number) => {
+    // Its title, so Settings → Recommendations can list it
+    const title = recs?.games.find((g) => g.igdbId === igdbId)?.title ?? recs?.because.flatMap((b) => b.games).find((g) => g.igdbId === igdbId)?.title ?? '';
     setRecs((r) =>
       r ? { ...r, games: r.games.filter((g) => g.igdbId !== igdbId), because: r.because.map((b) => ({ ...b, games: b.games.filter((g) => g.igdbId !== igdbId) })) } : r,
     );
-    await api.dismiss(igdbId, true).catch(() => undefined);
+    await api.dismiss(igdbId, true, title).catch(() => undefined);
   };
   return { recs, error, reload: load, dismiss };
 }

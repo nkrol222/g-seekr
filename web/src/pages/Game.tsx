@@ -5,7 +5,18 @@ import { cardStatus, TitleCard } from './Titles';
 import { HackList } from './RomHacks';
 
 // Seerr's title page: a backdrop, the poster and facts, the request per platform, then media and similar games
-export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rommUrl: string | null; onRequested: () => void }) {
+// prefs: the user's preferred platforms (listed first) and region (pre-picked when choosing a version), Settings → Content
+export function GamePage({
+  igdbId,
+  rommUrl,
+  prefs = { platforms: [], region: '' },
+  onRequested,
+}: {
+  igdbId: number;
+  rommUrl: string | null;
+  prefs?: { platforms: number[]; region: string };
+  onRequested: () => void;
+}) {
   const [page, setPage] = useState<Page | null>(null);
   const [platforms, setPlatforms] = useState<Map<number, Platform>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +109,7 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
   const notInterested = async () => {
     const dismissed = !mine.dismissed;
     setMine({ liked: dismissed ? false : mine.liked, dismissed });
-    await api.dismiss(igdbId, dismissed).catch(() => setMine(mine));
+    await api.dismiss(igdbId, dismissed, page?.game.title ?? '').catch(() => setMine(mine));
   };
 
   if (error && !page) return <Alert kind="error">{error}</Alert>;
@@ -135,6 +146,11 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
     return known.length > 0 ? REGIONS.filter((r) => known.includes(r)) : REGIONS;
   };
   const owns = (platformId: number) => (g.versions ?? []).filter((v) => v.platformId === platformId && v.downloaded);
+  // Preferred platforms first, in the user's order; the rest as IGDB lists them
+  const rank = (platformId: number) => {
+    const i = prefs.platforms.indexOf(platformId);
+    return i < 0 ? prefs.platforms.length : i;
+  };
 
   return (
     <article className="game-page">
@@ -197,7 +213,9 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
               <p className="muted">It isn’t out on any platform you can request.</p>
             ) : (
               <div className="platform-list">
-                {g.platformIds.map((pid) => {
+                {[...g.platformIds]
+                  .sort((a, b) => rank(a) - rank(b))
+                  .map((pid) => {
                   const platform = platforms.get(pid);
                   if (!platform) return null;
                   const s = statusFor(pid);
@@ -239,7 +257,7 @@ export function GamePage({ igdbId, rommUrl, onRequested }: { igdbId: number; rom
                           onClick={() => {
                             setPicking(picking === pid ? null : pid);
                             setAddOnsFor(null);
-                            setPicked({ region: '', variant: '', latestRevision: false });
+                            setPicked({ region: regions.includes(prefs.region) ? prefs.region : '', variant: '', latestRevision: false });
                             setWanted({ ...NO_ADDONS, latestUpdate: true });
                           }}
                         >

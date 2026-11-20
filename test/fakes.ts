@@ -95,6 +95,7 @@ export class Fakes {
 
     if (url.origin === ROMM) {
       if (this.rommDown) throw new TypeError('fetch failed');
+      if (url.pathname === '/api/heartbeat') return json({ SYSTEM: { VERSION: '5.4.1' } });
       const token = new Headers(init?.headers).get('authorization')?.replace(/^Bearer /, '') ?? '';
       const user = this.rommTokens.get(token);
       if (!user) return json({ detail: 'Forbidden' }, 403);
@@ -114,6 +115,7 @@ export class Fakes {
 
     if (url.origin === JELLYFIN) {
       if (this.jellyfinDown) throw new TypeError('fetch failed');
+      if (url.pathname === '/System/Info/Public') return json({ ServerName: 'apollo', Version: '10.11.0' });
       if (url.pathname === '/Sessions/Logout') {
         this.jellyfinLogouts++;
         return new Response(null, { status: 204 });

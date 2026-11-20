@@ -51,11 +51,16 @@ export class RecommendService {
     private readonly config: Config,
     private readonly store: Store,
     private readonly discover: DiscoverService,
-    private readonly romm: RommClient | null,
+    // A getter: RomM's API address can change in Settings
+    private readonly rommFor: () => RommClient | null,
     private readonly log: Logger,
     private readonly now: () => Date = () => new Date(),
     private readonly romHacks: RomHackCatalogue | null = null,
   ) {}
+
+  private get romm(): RommClient | null {
+    return this.rommFor();
+  }
 
   // A like, a dismissal, a request or a RomM link changes what to recommend
   forget(userId: number): void {

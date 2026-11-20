@@ -40,6 +40,19 @@ export class RommClient {
     return (await res.json()) as T;
   }
 
+  // Settings → Connections' Test: RomM's public heartbeat, no token; its version when it says
+  async heartbeat(): Promise<{ version: string | null }> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.baseUrl}/api/heartbeat`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+    } catch (err) {
+      throw new RommError(`RomM is not reachable: ${(err as Error).message}`, 0);
+    }
+    if (!res.ok) throw new RommError(`RomM answered ${res.status}`, res.status);
+    const body = (await res.json().catch(() => ({}))) as { SYSTEM?: { VERSION?: unknown } };
+    return { version: typeof body.SYSTEM?.VERSION === 'string' ? body.SYSTEM.VERSION : null };
+  }
+
   async me(token: string): Promise<{ username: string }> {
     const me = await this.call<Record<string, unknown>>(token, '/users/me');
     return { username: String(me.username ?? '') };

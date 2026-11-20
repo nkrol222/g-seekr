@@ -2555,3 +2555,240 @@ table.table {
 .error-text {
   color: var(--danger, #f38ba8);
 }
+
+/* ---------- settings ---------- */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+.settings-nav {
+  display: grid;
+  gap: 0.2rem;
+  position: sticky;
+  top: calc(var(--topbar-h) + 1rem);
+}
+.settings-nav-head {
+  margin: 0.75rem 0 0.25rem;
+  padding: 0 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gray-500);
+}
+.settings-nav-head:first-child {
+  margin-top: 0;
+}
+.settings-nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--gray-300);
+}
+.settings-nav a svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: none;
+}
+.settings-nav a:hover {
+  background: var(--gray-800);
+  color: var(--bright);
+}
+.settings-nav a.active {
+  background: var(--indigo-400);
+  color: var(--ink);
+}
+.settings-panel {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+/* Users and Tasks keep their own page, a level down here */
+.settings-panel .page-title {
+  margin-top: 0;
+}
+.settings-panel .page-title h1 {
+  font-size: 1.9rem;
+}
+.settings-card {
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--gray-700);
+  border-radius: 0.5rem;
+  background: var(--gray-800);
+}
+.settings-card h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.7rem;
+  line-height: 1.1;
+  color: var(--indigo-400);
+  margin-bottom: 0.4rem;
+}
+.settings-card > .hint {
+  margin: 0 0 1rem;
+  color: var(--gray-400);
+  font-size: 0.875rem;
+}
+.settings-card .setting {
+  margin-bottom: 1.1rem;
+  max-width: 40rem;
+}
+.settings-card .setting .hint {
+  margin: 0.35rem 0 0;
+  color: var(--gray-400);
+  font-size: 0.8rem;
+}
+.settings-card .source {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.settings-card .source.saved {
+  color: var(--amber-400);
+}
+.settings-card button.link {
+  margin-left: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--indigo-400);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.settings-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.6rem 1.25rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+.settings-facts dt {
+  color: var(--gray-400);
+}
+.settings-facts dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+.settings-facts code {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--gray-200);
+}
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+.settings-test {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+.test-ok {
+  color: var(--indigo-400);
+}
+.test-failed {
+  color: var(--red-400);
+}
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.25rem;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--gray-600);
+  border-radius: 999px;
+  background: var(--gray-900);
+  color: var(--gray-300);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.chip:hover {
+  border-color: var(--indigo-500);
+}
+.chip.on {
+  border-color: var(--indigo-400);
+  color: var(--indigo-300);
+}
+.chip-n {
+  display: grid;
+  place-items: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  background: var(--indigo-400);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.taste-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+.taste-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--gray-700);
+}
+.taste-list li:last-child {
+  border-bottom: 0;
+}
+.taste-list a:hover {
+  color: var(--indigo-400);
+}
+@media (max-width: 760px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* The tabs become a row that scrolls sideways */
+  .settings-nav {
+    position: static;
+    display: flex;
+    overflow-x: auto;
+    gap: 0.4rem;
+    padding-bottom: 0.25rem;
+  }
+  .settings-nav-head {
+    display: none;
+  }
+  .settings-nav a {
+    flex: none;
+  }
+  .settings-card {
+    padding: 1rem;
+  }
+  .settings-facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.15rem;
+  }
+  .settings-facts dd {
+    margin-bottom: 0.6rem;
+  }
+}
