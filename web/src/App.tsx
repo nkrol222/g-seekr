@@ -12,7 +12,7 @@ import { Issues } from './pages/Issues';
 import { Collections, CollectionView } from './pages/Collections';
 import { ImportReview, ImportStart } from './pages/Imports';
 import { RomHacks } from './pages/RomHacks';
-import { Avatar, Icon, Mark, type IconName } from './pages/shared';
+import { Avatar, Icon, Mark, Wordmark, type IconName } from './pages/shared';
 
 type View = 'discover' | 'for-you' | 'romhacks' | 'browse' | 'search' | 'game' | 'collections' | 'collection' | 'import' | 'import-review' | 'requests' | 'issues' | 'users' | 'tasks';
 
@@ -183,7 +183,9 @@ function Shell({
           <span className="mark">
             <Mark />
           </span>
-          <b>g-seekr</b>
+          <b>
+            <Wordmark />
+          </b>
         </a>
         <nav aria-label="Main">
           {links.map((l) => (

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api, type Me } from '../api';
-import { Alert, Mark } from './shared';
+import { Alert, Mark, Wordmark } from './shared';
 
 export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   const [username, setUsername] = useState('');
@@ -28,7 +28,9 @@ export function Login({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
           <span className="mark">
             <Mark />
           </span>
-          <h1>g-seekr</h1>
+          <h1>
+            <Wordmark />
+          </h1>
         </div>
         <form onSubmit={submit}>
           <h2>Sign in with your Jellyfin account</h2>

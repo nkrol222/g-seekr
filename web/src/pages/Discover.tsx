@@ -6,7 +6,7 @@ import { GameRow, TitleCard } from './Titles';
 import { reasonText, useRecommendations } from './ForYou';
 import { CollectionRow, useCollectionRows } from './Collections';
 
-// Seerr's Discover: a welcome, then rows of posters. The game rows follow only the user's adult-games switch;
+// Seerr's Discover: a one-line status of the user's requests, then rows of posters. The game rows follow only the user's adult-games switch;
 // the Browse page has the full filters.
 export function Discover({ me }: { me: Me }) {
   const [requests, setRequests] = useState<GameRequest[] | null>(null);
@@ -25,6 +25,8 @@ export function Discover({ me }: { me: Me }) {
   }, [me.user.isAdmin]);
 
   const { limit, used, days } = me.limits;
+  // An admin sees everyone's requests below; the status line counts their own
+  const mine = (requests ?? []).filter((r) => r.userId === me.user.id);
   const ready = (requests ?? []).filter((r) => r.status === 'available');
   const recent = [...(requests ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20);
   const waiting = me.user.isAdmin ? (requests ?? []).filter((r) => r.status === 'pending') : [];
@@ -32,23 +34,29 @@ export function Discover({ me }: { me: Me }) {
 
   return (
     <>
-      <section className="hero">
-        <h1>Hi {me.user.username}, what do you want to play?</h1>
-        <p>Browse what’s popular, search for any game, pick the platform and request it. You’ll see it here, and in RomM, once it’s ready.</p>
-        <div className="hero-actions">
-          <a className="btn primary" href="#/browse">
-            <Icon name="sparkles" /> Browse games
-          </a>
-          {limit > 0 && (
-            <span className="quota">
-              <span className="meter" aria-hidden="true">
-                <span style={{ width: `${Math.min(100, (used / limit) * 100)}%` }} />
-              </span>
-              {used} of {limit} requests used in the last {days} days
+      {/* One status line instead of a banner: the user's own requests at a glance, and the quota */}
+      <nav className="status-line" aria-label="Your requests">
+        <a href="#/requests?filter=available">
+          <span className="dot ready" aria-hidden="true" />
+          {mine.filter((r) => r.status === 'available').length} ready to play
+        </a>
+        <a href="#/requests?filter=processing">
+          <span className="dot coming" aria-hidden="true" />
+          {mine.filter((r) => r.status === 'approved' || r.status === 'searching' || r.status === 'downloading').length} on the way
+        </a>
+        <a href="#/requests?filter=pending">
+          <span className="dot waiting" aria-hidden="true" />
+          {mine.filter((r) => r.status === 'pending').length} waiting for approval
+        </a>
+        {limit > 0 && (
+          <span className="quota">
+            requests {used}/{limit} · {days} days
+            <span className="meter" aria-hidden="true">
+              <span style={{ width: `${Math.min(100, (used / limit) * 100)}%` }} />
             </span>
-          )}
-        </div>
-      </section>
+          </span>
+        )}
+      </nav>
       {error && <Alert kind="error">{error}</Alert>}
       {waiting.length > 0 && <RequestRow title="Waiting for approval" requests={waiting} showUser link="#/requests?filter=pending" />}
       {recs && recs.games.length > 0 && (
