@@ -18,6 +18,8 @@ import { IssueService, isIssueKind } from './issues.js';
 import { DiscoverService } from './discover.js';
 import { RecommendService } from './recommend.js';
 import { RommClient, RommError } from './romm.js';
+import { SettingsError, SettingsService } from './settings.js';
+import { REGIONS } from './versions.js';
 import { CollectionService } from './collections.js';
 import { TaskRunner, TaskSkipped } from './tasks.js';
 import { Store, type User } from './store.js';
@@ -37,6 +39,8 @@ export interface AppDeps {
   webDir?: string | null;
   now?: () => Date;
   logger?: boolean;
+  // Where Settings reads which settings the environment gave (tests pass their own)
+  env?: Record<string, string | undefined>;
 }
 
 const PUBLIC_ROUTES = new Set(['/api/health', '/api/auth/login']);
@@ -60,11 +64,20 @@ export async function buildApp(deps: AppDeps) {
     error: (m: string) => app.log.error(m),
   };
   const store = new Store(db, deps.now);
-  const notifier = new Notifier(config.discordWebhookUrl, log, deps.fetchImpl);
+  // Settings an admin saved replace the environment's values in config, so everything below reads them
+  const settings = new SettingsService(config, store, deps.env ?? process.env);
+  const notifier = new Notifier(() => config.discordWebhookUrl, log, deps.fetchImpl);
   const requests = new RequestService(config, store, deps.retroarr, notifier, log, deps.now);
   const issues = new IssueService(store, deps.retroarr, notifier, log, (u) => requests.isAdmin(u), deps.now);
   const discover = new DiscoverService(store, deps.retroarr, requests);
-  const romm = config.rommApiUrl ? new RommClient(config.rommApiUrl, deps.fetchImpl) : null;
+  // RomM's API address can change in Settings: one client per address, made when first needed
+  let rommClient: { url: string; client: RommClient } | null = null;
+  const romm = (): RommClient | null => {
+    const url = config.rommApiUrl;
+    if (!url) return null;
+    if (rommClient?.url !== url) rommClient = { url, client: new RommClient(url, deps.fetchImpl) };
+    return rommClient.client;
+  };
   // RetroArr's ROM hack catalogue (homelab-iac's files/retroarr/romhacks.yaml)
   const romHacks = new RomHackCatalogue(deps.retroarr, store, () => requests.platforms(), deps.now);
   const recommend = new RecommendService(config, store, discover, romm, log, deps.now, romHacks);
@@ -167,6 +180,13 @@ export async function buildApp(deps: AppDeps) {
   const requireAdmin = async (req: FastifyRequest, reply: FastifyReply) => {
     if (!req.user || !requests.isAdmin(req.user)) return reply.code(403).send({ error: 'Admins only.' });
   };
+  // Every admins-only route, as "METHOD /path": the tests send a non-admin to each one
+  const adminRoutes: string[] = [];
+  app.addHook('onRoute', (route) => {
+    const pre = route.preHandler;
+    if (pre === requireAdmin || (Array.isArray(pre) && pre.includes(requireAdmin)))
+      for (const m of [route.method].flat()) if (m !== 'HEAD') adminRoutes.push(`${m} ${route.url}`);
+  });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof RequestError) {
@@ -191,6 +211,7 @@ export async function buildApp(deps: AppDeps) {
     user: { id: user.id, username: user.username, isAdmin: requests.isAdmin(user), autoApprove: user.autoApprove },
     limits: requests.limitFor(user),
     rommUrl: config.rommUrl,
+    prefs: store.userPrefs(user.id),
   });
 
   // ---- auth ----
@@ -331,13 +352,102 @@ export async function buildApp(deps: AppDeps) {
     return { liked: req.body.liked };
   });
 
-  app.put<{ Params: { igdbId: string }; Body: { dismissed?: unknown } }>('/api/games/:igdbId/dismiss', async (req, reply) => {
+  app.put<{ Params: { igdbId: string }; Body: { dismissed?: unknown; title?: unknown } }>('/api/games/:igdbId/dismiss', async (req, reply) => {
     const igdbId = gameId(req.params.igdbId);
     if (igdbId === null || typeof req.body?.dismissed !== 'boolean') return reply.code(400).send({ error: 'Say whether you’re interested.' });
-    store.setDismissed(req.user!.id, igdbId, req.body.dismissed);
+    const title = typeof req.body.title === 'string' ? req.body.title.trim().slice(0, 200) : '';
+    store.setDismissed(req.user!.id, igdbId, req.body.dismissed, title);
     if (req.body.dismissed) store.setLike(req.user!.id, igdbId, '', false);
     recommend.forget(req.user!.id);
     return { dismissed: req.body.dismissed };
+  });
+
+  // ---- settings: the user's own ----
+
+  // Settings → Recommendations: what the user liked and marked "not interested", to undo either. A "not interested"
+  // from before titles were kept is looked up once (20 at a time) and remembered.
+  app.get('/api/me/taste', async (req) => {
+    const userId = req.user!.id;
+    const dismissed = store.dismissedList(userId);
+    const missing = dismissed.filter((d) => !d.title).slice(0, 20);
+    await Promise.all(
+      missing.map(async (d) => {
+        const game = await deps.retroarr.discoverGame(d.igdbId, true).catch(() => null);
+        if (game?.game.title) {
+          d.title = game.game.title;
+          store.setDismissedTitle(userId, d.igdbId, game.game.title);
+        }
+      }),
+    );
+    return { liked: store.likes(userId), dismissed };
+  });
+
+  // Settings → Content: the platforms to offer first and the region to pick when requesting
+  app.put<{ Body: { platforms?: unknown; region?: unknown } }>('/api/me/preferences', async (req, reply) => {
+    const raw = req.body?.platforms;
+    if (!Array.isArray(raw) || raw.length > 50 || !raw.every((n) => Number.isInteger(n) && (n as number) > 0))
+      return reply.code(400).send({ error: 'Platforms must be a list of platform ids.' });
+    const region = typeof req.body?.region === 'string' ? req.body.region.trim() : '';
+    if (region && !(REGIONS as readonly string[]).includes(region)) return reply.code(400).send({ error: `Region must be one of ${REGIONS.join(', ')}.` });
+    const known = new Set((await requests.platforms()).map((p) => p.id));
+    const platforms = [...new Set(raw as number[])].filter((id) => known.has(id));
+    store.saveUserPrefs(req.user!.id, { platforms, region });
+    return { prefs: store.userPrefs(req.user!.id) };
+  });
+
+  // ---- settings: the server's (admins only) ----
+
+  const connections = () => ({
+    jellyfinUrl: config.jellyfinUrl,
+    retroarrUrl: config.retroarrUrl,
+    retroarrToken: Boolean(config.retroarrToken),
+    retroarrWebhookToken: Boolean(config.retroarrWebhookToken),
+    igdb: Boolean(config.igdbClientId && config.igdbClientSecret),
+    rommApiUrl: config.rommApiUrl,
+  });
+
+  app.get('/api/admin/settings', { preHandler: requireAdmin }, async () => ({ settings: settings.list(), connections: connections() }));
+
+  app.patch<{ Body: { settings?: unknown } }>('/api/admin/settings', { preHandler: requireAdmin }, async (req, reply) => {
+    try {
+      return { settings: settings.update(req.body?.settings as Record<string, unknown>, req.user!.id), connections: connections() };
+    } catch (err) {
+      if (err instanceof SettingsError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  // Settings → Connections and Notifications: try one connection now and say how it went
+  app.post<{ Params: { what: string } }>('/api/admin/settings/test/:what', { preHandler: requireAdmin }, async (req, reply) => {
+    const ok = (message: string) => ({ ok: true, message });
+    const failed = (err: unknown) => ({ ok: false, message: (err as Error).message });
+    switch (req.params.what) {
+      case 'jellyfin':
+        return deps.jellyfin
+          .ping()
+          .then((i) => ok(`Jellyfin answered${i.serverName ? `: ${i.serverName}` : ''}${i.version ? ` (${i.version})` : ''}.`))
+          .catch(failed);
+      case 'retroarr':
+        return deps.retroarr
+          .status()
+          .then((s) => ok(`RetroArr accepted the token${s.version ? ` (version ${s.version})` : ''}.`))
+          .catch(failed);
+      case 'romm': {
+        const client = romm();
+        if (!client) return { ok: false, message: 'No RomM API address is set.' };
+        return client
+          .heartbeat()
+          .then((h) => ok(`RomM answered${h.version ? ` (version ${h.version})` : ''}.`))
+          .catch(failed);
+      }
+      case 'discord':
+        return notifier
+          .test()
+          .then(() => ok('Sent a test message to the Discord channel.'))
+          .catch(failed);
+      default:
+        return reply.code(404).send({ error: 'Nothing to test by that name.' });
+    }
   });
 
   app.get('/api/me/romm', async (req) => recommend.rommStatus(req.user!));
@@ -684,7 +794,7 @@ export async function buildApp(deps: AppDeps) {
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found.' }));
   }
 
-  return { app, store, requests, issues, recommend, collections, tasks };
+  return { app, store, requests, issues, recommend, collections, tasks, settings, adminRoutes };
 }
 
 declare module 'fastify' {

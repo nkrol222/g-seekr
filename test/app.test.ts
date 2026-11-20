@@ -13,8 +13,8 @@ let fakes: Fakes;
 let built: App;
 let clock: Date;
 
-async function start(overrides: Record<string, string> = {}) {
-  const config: Config = loadConfig({
+async function start(overrides: Record<string, string> = {}, db = openDb(':memory:')) {
+  const env = {
     JELLYFIN_URL: JELLYFIN,
     RETROARR_URL: RETROARR,
     RETROARR_TOKEN: TOKEN,
@@ -22,10 +22,12 @@ async function start(overrides: Record<string, string> = {}) {
     ROMM_URL: 'https://romm.test',
     REQUEST_LIMIT: '2',
     ...overrides,
-  });
+  };
+  const config: Config = loadConfig(env);
   built = await buildApp({
     config,
-    db: openDb(':memory:'),
+    env,
+    db,
     jellyfin: new JellyfinClient(JELLYFIN, fakes.fetch),
     retroarr: new RetroArrClient(RETROARR, TOKEN, fakes.fetch),
     fetchImpl: fakes.fetch,
@@ -1126,5 +1128,140 @@ describe('collections in progress', () => {
     const a = await login('alice');
     const rows = (await built.app.inject({ url: '/api/collections', headers: a.headers })).json();
     expect(rows.inProgress).toMatchObject([{ kind: 'series', id: 5, name: 'Final Fantasy', total: 2, inLibrary: 1 }]);
+  });
+});
+
+describe('settings', () => {
+  it('sends a non-admin away from every admins-only route, and a signed-out visitor from every route', async () => {
+    await start();
+    await login('root');
+    const { headers } = await login('alice');
+    const routes = built.adminRoutes;
+    // The registry finds the admin routes (so a new one is covered without touching this test)
+    expect(routes).toEqual(expect.arrayContaining(['GET /api/admin/settings', 'PATCH /api/admin/settings', 'POST /api/admin/settings/test/:what', 'GET /api/admin/users', 'GET /api/admin/tasks', 'POST /api/requests/:id/approve']));
+    // Every /api/admin route is in it: none forgot its guard
+    const all = built.app.printRoutes({ commonPrefix: false });
+    expect(all).toContain('/api/admin/settings');
+    for (const route of routes) {
+      const [method, path] = route.split(' ') as [string, string];
+      const url = path.replace(/:\w+/g, '1');
+      const asUser = await built.app.inject({ method: method as 'GET', url, headers, payload: method === 'GET' || method === 'DELETE' ? undefined : {} });
+      expect(asUser.statusCode, route).toBe(403);
+      const anonymous = await built.app.inject({ method: method as 'GET', url, headers: H, payload: method === 'GET' || method === 'DELETE' ? undefined : {} });
+      expect(anonymous.statusCode, route).toBe(401);
+    }
+    expect(routes.length).toBeGreaterThan(20);
+  });
+
+  it('shows where each setting comes from, never a secret, and what the environment holds', async () => {
+    await start({ REQUEST_LIMIT_DAYS: '14' });
+    const { headers } = await login('root');
+    const res = await built.app.inject({ url: '/api/admin/settings', headers });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { settings: { key: string; value: unknown; set: boolean; source: string }[]; connections: Record<string, unknown> };
+    const by = Object.fromEntries(body.settings.map((s) => [s.key, s]));
+    expect(by.requestLimit).toMatchObject({ value: 2, source: 'env' });
+    expect(by.requestLimitDays).toMatchObject({ value: 14, source: 'env' });
+    expect(by.sessionDays).toMatchObject({ value: 30, source: 'default' });
+    expect(by.discordWebhookUrl).toMatchObject({ value: null, set: true, source: 'env' });
+    expect(JSON.stringify(body)).not.toContain(DISCORD);
+    expect(JSON.stringify(body)).not.toContain(TOKEN);
+    expect(body.connections).toMatchObject({ retroarrToken: true, retroarrWebhookToken: false, igdb: false, rommApiUrl: null });
+  });
+
+  it('applies a saved setting at once, keeps it over a restart, and goes back to the environment on reset', async () => {
+    const db = openDb(':memory:');
+    await start({}, db);
+    let admin = (await login('root')).headers;
+    const alice = (await login('alice')).headers;
+    expect((await built.app.inject({ url: '/api/me', headers: alice })).json()).toMatchObject({ limits: { limit: 2, days: 7 } });
+
+    const saved = await built.app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: admin, payload: { settings: { requestLimit: 5, requestLimitDays: '3', rommUrl: 'https://play.example/' } } });
+    expect(saved.statusCode).toBe(200);
+    expect((await built.app.inject({ url: '/api/me', headers: alice })).json()).toMatchObject({ limits: { limit: 5, days: 3 }, rommUrl: 'https://play.example' });
+
+    // A restart on the same database keeps what was saved, though the environment says otherwise
+    await built.app.close();
+    await start({}, db);
+    admin = (await login('root')).headers;
+    const again = (await login('alice')).headers;
+    expect((await built.app.inject({ url: '/api/me', headers: again })).json()).toMatchObject({ limits: { limit: 5, days: 3 } });
+
+    // null resets to the environment's value
+    const reset = await built.app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: admin, payload: { settings: { requestLimit: null } } });
+    expect(reset.json().settings.find((s: { key: string }) => s.key === 'requestLimit')).toMatchObject({ value: 2, source: 'env' });
+    expect((await built.app.inject({ url: '/api/me', headers: again })).json()).toMatchObject({ limits: { limit: 2, days: 3 } });
+  });
+
+  it('refuses bad values and changes nothing when one of them is bad', async () => {
+    await start();
+    const { headers } = await login('root');
+    for (const settings of [
+      { requestLimit: -1 },
+      { requestLimit: 1.5 },
+      { sessionDays: 0 },
+      { jellyfinAdminsAreAdmins: 'yes' },
+      { publicUrl: 'not a url' },
+      { publicUrl: 'ftp://x.example' },
+      { rommUrl: 'https://user:pw@romm.example' },
+      { discordWebhookUrl: 'http://discord.example/hook' },
+      { retroarrToken: 'rat_x' },
+      { requestLimit: 4, nope: 1 },
+    ]) {
+      const res = await built.app.inject({ method: 'PATCH', url: '/api/admin/settings', headers, payload: { settings } });
+      expect(res.statusCode, JSON.stringify(settings)).toBe(400);
+    }
+    expect((await built.app.inject({ method: 'PATCH', url: '/api/admin/settings', headers, payload: {} })).statusCode).toBe(400);
+    const list = (await built.app.inject({ url: '/api/admin/settings', headers })).json().settings as { key: string; value: unknown }[];
+    expect(list.find((s) => s.key === 'requestLimit')!.value).toBe(2);
+  });
+
+  it('turns Discord off by emptying the webhook, and on again with a new one', async () => {
+    await start();
+    const { headers } = await login('root');
+    await built.app.inject({ method: 'PATCH', url: '/api/admin/settings', headers, payload: { settings: { discordWebhookUrl: '' } } });
+    const off = await built.app.inject({ method: 'POST', url: '/api/admin/settings/test/discord', headers, payload: {} });
+    expect(off.json()).toMatchObject({ ok: false, message: 'No Discord webhook is set.' });
+    expect(fakes.discord).toHaveLength(0);
+    await built.app.inject({ method: 'PATCH', url: '/api/admin/settings', headers, payload: { settings: { discordWebhookUrl: null } } });
+    const on = await built.app.inject({ method: 'POST', url: '/api/admin/settings/test/discord', headers, payload: {} });
+    expect(on.json()).toMatchObject({ ok: true });
+    expect(fakes.discord).toHaveLength(1);
+  });
+
+  it('tests the connections, and RomM once its address is set in Settings', async () => {
+    await start();
+    const { headers } = await login('root');
+    const test = async (what: string) => (await built.app.inject({ method: 'POST', url: `/api/admin/settings/test/${what}`, headers, payload: {} })).json();
+    expect(await test('jellyfin')).toMatchObject({ ok: true, message: expect.stringContaining('apollo') });
+    expect(await test('retroarr')).toMatchObject({ ok: true });
+    expect(await test('romm')).toMatchObject({ ok: false, message: 'No RomM API address is set.' });
+    await built.app.inject({ method: 'PATCH', url: '/api/admin/settings', headers, payload: { settings: { rommApiUrl: ROMM } } });
+    expect(await test('romm')).toMatchObject({ ok: true, message: expect.stringContaining('5.4.1') });
+    fakes.jellyfinDown = true;
+    expect(await test('jellyfin')).toMatchObject({ ok: false });
+    expect((await built.app.inject({ method: 'POST', url: '/api/admin/settings/test/nope', headers, payload: {} })).statusCode).toBe(404);
+  });
+
+  it('keeps each user’s request preferences and lists what they liked and dismissed', async () => {
+    await start();
+    const { headers } = await login('alice');
+    const bob = (await login('bob')).headers;
+    const ok = await built.app.inject({ method: 'PUT', url: '/api/me/preferences', headers, payload: { platforms: [50, 41, 50, 9999], region: 'Europe' } });
+    expect(ok.json()).toEqual({ prefs: { platforms: [50, 41], region: 'Europe' } });
+    expect((await built.app.inject({ url: '/api/me', headers })).json().prefs).toEqual({ platforms: [50, 41], region: 'Europe' });
+    expect((await built.app.inject({ url: '/api/me', headers: bob })).json().prefs).toEqual({ platforms: [], region: '' });
+    for (const payload of [{ platforms: 'x' }, { platforms: [1.5] }, { platforms: [], region: 'Mars' }, { platforms: Array.from({ length: 51 }, (_, i) => i + 1) }]) {
+      expect((await built.app.inject({ method: 'PUT', url: '/api/me/preferences', headers, payload })).statusCode, JSON.stringify(payload)).toBe(400);
+    }
+
+    await built.app.inject({ method: 'PUT', url: '/api/games/1103/like', headers, payload: { liked: true, title: 'Super Metroid' } });
+    await built.app.inject({ method: 'PUT', url: '/api/games/1026/dismiss', headers, payload: { dismissed: true, title: 'Zelda' } });
+    // a "not interested" from before titles were kept gets its title from RetroArr
+    built.store.setDismissed(built.store.listUsers().find((u) => u.username === 'alice')!.id, 427, true);
+    const taste = (await built.app.inject({ url: '/api/me/taste', headers })).json();
+    expect(taste.liked.map((l: { title: string }) => l.title)).toEqual(['Super Metroid']);
+    expect(taste.dismissed.map((d: { igdbId: number; title: string }) => [d.igdbId, d.title]).sort()).toEqual([[1026, 'Zelda'], [427, 'Final Fantasy VII']]);
+    expect((await built.app.inject({ url: '/api/me/taste', headers: bob })).json()).toEqual({ liked: [], dismissed: [] });
   });
 });

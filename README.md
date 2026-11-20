@@ -56,7 +56,7 @@ They need `RETROARR_WEBHOOK_TOKEN`; see "RetroArr webhook" below. Every `POLL_SE
 
 ### Tasks
 
-Admins see g-seekr's timed jobs under **Tasks**: how often each runs (changeable there; the
+Admins see g-seekr's timed jobs under **Settings → Tasks**: how often each runs (changeable there; the
 interval is kept in the database), how the last run went, when the next one is, and **Run now**.
 They run one at a time, and after a restart each waits its own delay, so RetroArr isn't asked for
 everything at once:
@@ -70,9 +70,9 @@ everything at once:
 ## Rules
 
 - **One open request per game and platform.** A second request is refused with "already requested". A game that's already downloaded is refused with "already in the library".
-- **Request limit:** `REQUEST_LIMIT` per user every `REQUEST_LIMIT_DAYS`. Admins can change the limit per user. Admins themselves have no limit.
+- **Request limit:** `REQUEST_LIMIT` per user every `REQUEST_LIMIT_DAYS` (both changeable in **Settings → Requests**). Admins can change the limit per user in **Settings → Users**. Admins themselves have no limit.
 - **Platforms:** exactly those enabled in RetroArr (Settings → Platforms); a change there shows within two minutes. A game can only be requested for platforms IGDB lists it on.
-- **Admins** are Jellyfin admins (unless `JELLYFIN_ADMINS_ARE_ADMINS=false`) and anyone made admin on the Users page. The first Jellyfin admin to sign in always becomes one.
+- **Admins** are Jellyfin admins (unless `JELLYFIN_ADMINS_ARE_ADMINS=false`, or switched off in Settings → Requests) and anyone made admin in Settings → Users. The first Jellyfin admin to sign in always becomes one.
 - **Withdrawing:** requesters can withdraw their own pending requests. Admins can remove any request; RetroArr keeps the game.
 
 ## Security
@@ -84,11 +84,33 @@ everything at once:
 - **RetroArr access** uses a scoped token (`requests`), never the instance API key. The config refuses anything that isn't a `rat_…` token. With that token RetroArr refuses deletes, settings and token management.
 - **Discord messages** are sent with mentions disabled, so a game title can't ping anyone.
 - **Headers:** responses carry a strict Content-Security-Policy, `X-Frame-Options: DENY` and `nosniff`.
+- **Admin pages:** every admin API route answers 403 to anyone else, checked on the server; the web app also sends a non-admin who opens an admin page's address to their own Settings. A test sends a non-admin, and a signed-out visitor, to every route registered as admins-only.
 
 ## Configuration
 
-Everything comes from environment variables. [`.env.example`](.env.example) lists them with
+Everything starts from environment variables. [`.env.example`](.env.example) lists them with
 their defaults. `JELLYFIN_URL`, `RETROARR_URL` and `RETROARR_TOKEN` are required.
+
+### Settings
+
+**Settings** in the sidebar has the user's own pages for everyone, and the server's for admins:
+
+| Page | Who | What |
+|---|---|---|
+| Account | everyone | who you are, your request allowance, linking your RomM account |
+| Content | everyone | showing adult games; the platforms you play on (listed first on a game's page); a region pre-picked when you choose a version |
+| Recommendations | everyone | the games you liked and marked "not interested", to undo either |
+| General | admins | `PUBLIC_URL`, `ROMM_URL`, `ROMM_API_URL`, `SESSION_DAYS` |
+| Requests | admins | `REQUEST_LIMIT`, `REQUEST_LIMIT_DAYS`, `JELLYFIN_ADMINS_ARE_ADMINS` |
+| Notifications | admins | `DISCORD_WEBHOOK_URL` (never shown once set), with a Test message |
+| Connections | admins | Jellyfin, RetroArr, RomM and IGDB as configured, each with a Test |
+| Users, Tasks | admins | as before |
+
+The environment gives each of the admin settings its first value. A value saved in Settings is
+kept in the database and wins from then on, at once and over restarts, until **Reset** takes it
+back to the environment's. Each field says where its value comes from. Secrets and how the server
+is deployed (the RetroArr and webhook tokens, IGDB credentials, `JELLYFIN_URL`, `RETROARR_URL`,
+ports, proxies, cookies) stay in the environment only.
 
 To create the RetroArr token: RetroArr → **Settings → API access → Tokens for other apps**.
 Name it `g-seekr`, tick only `requests`, and copy the `rat_…` value. It's shown once.

@@ -224,6 +224,22 @@ const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX ux_requests_hack_open ON requests(variant)
     WHERE kind = 'hack' AND status IN ('pending', 'approved', 'searching', 'downloading');
   `,
+  // 14: Settings. Server settings an admin changed in the UI (the environment gives the rest); each user's request
+  // preferences; the title of a game marked "not interested", for the Recommendations settings page.
+  `
+  CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE TABLE user_prefs (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    platforms TEXT NOT NULL DEFAULT '[]',
+    region TEXT NOT NULL DEFAULT ''
+  );
+  ALTER TABLE dismissed ADD COLUMN title TEXT NOT NULL DEFAULT '';
+  `,
 ];
 
 export function openDb(path: string): Db {

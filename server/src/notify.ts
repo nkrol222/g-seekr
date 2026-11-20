@@ -3,11 +3,29 @@ import type { GameRequest, Issue } from './store.js';
 // Discord messages for new requests and for changes the requester cares about.
 // Plain text with mentions switched off, so a game title can't ping @everyone.
 export class Notifier {
+  // webhookUrl: the URL, or a getter for one an admin can change in Settings
   constructor(
-    private readonly webhookUrl: string | null,
+    private readonly webhookUrl: string | null | (() => string | null),
     private readonly log: { warn: (msg: string) => void },
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
+
+  private get url(): string | null {
+    return typeof this.webhookUrl === 'function' ? this.webhookUrl() : this.webhookUrl;
+  }
+
+  // Settings → Notifications' Test: sends one message and says what went wrong, instead of only logging it
+  async test(): Promise<void> {
+    const url = this.url;
+    if (!url) throw new Error('No Discord webhook is set.');
+    const res = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'g-seekr test message: notifications reach this channel.', allowed_mentions: { parse: [] } }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`Discord answered ${res.status}${res.status === 404 ? ' (the webhook was deleted, or the URL is wrong)' : ''}`);
+  }
 
   private label(r: GameRequest): string {
     const game = `**${r.title}**${r.year ? ` (${r.year})` : ''} for ${r.platformName}`;
@@ -55,9 +73,10 @@ export class Notifier {
   }
 
   private async send(content: string): Promise<void> {
-    if (!this.webhookUrl) return;
+    const url = this.url;
+    if (!url) return;
     try {
-      const res = await this.fetchImpl(this.webhookUrl, {
+      const res = await this.fetchImpl(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: content.slice(0, 2000), allowed_mentions: { parse: [] } }),

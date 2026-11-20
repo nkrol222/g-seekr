@@ -23,6 +23,14 @@ export class JellyfinClient {
     return `MediaBrowser ${parts.join(', ')}`;
   }
 
+  // Settings → Connections' Test: Jellyfin's public system info
+  async ping(): Promise<{ serverName: string | null; version: string | null }> {
+    const res = await this.fetchImpl(`${this.baseUrl}/System/Info/Public`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`Jellyfin answered ${res.status}`);
+    const body = (await res.json().catch(() => ({}))) as { ServerName?: unknown; Version?: unknown };
+    return { serverName: typeof body.ServerName === 'string' ? body.ServerName : null, version: typeof body.Version === 'string' ? body.Version : null };
+  }
+
   // null for a wrong username or password, or a disabled account; throws when Jellyfin can't be reached
   async authenticate(username: string, password: string): Promise<JellyfinUser | null> {
     const deviceId = 'g-seekr-' + createHash('sha256').update(username.toLowerCase()).digest('hex').slice(0, 16);

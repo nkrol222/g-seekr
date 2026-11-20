@@ -4,6 +4,8 @@ export interface Me {
   user: { id: number; username: string; isAdmin: boolean; autoApprove: boolean };
   limits: { limit: number; days: number; used: number };
   rommUrl: string | null;
+  // Settings → Content: platforms to list first and the region to pre-pick when choosing a version
+  prefs: { platforms: number[]; region: string };
 }
 
 export interface Platform {
@@ -454,6 +456,31 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return data as T;
 }
 
+export interface TasteItem {
+  igdbId: number;
+  title: string;
+  createdAt: string;
+}
+
+export type SettingKey = 'publicUrl' | 'rommUrl' | 'rommApiUrl' | 'sessionDays' | 'requestLimit' | 'requestLimitDays' | 'jellyfinAdminsAreAdmins' | 'discordWebhookUrl';
+
+export interface SettingView {
+  key: SettingKey;
+  group: 'general' | 'requests' | 'notifications';
+  kind: 'url' | 'int' | 'bool' | 'secret-url';
+  // null for a secret: `set` says whether it has one
+  value: string | number | boolean | null;
+  set: boolean;
+  source: 'saved' | 'env' | 'default';
+  min?: number;
+  max?: number;
+}
+
+export interface AdminSettings {
+  settings: SettingView[];
+  connections: { jellyfinUrl: string; retroarrUrl: string; retroarrToken: boolean; retroarrWebhookToken: boolean; igdb: boolean; rommApiUrl: string | null };
+}
+
 export const api = {
   me: () => call<Me>('GET', '/me'),
   login: (username: string, password: string) => call<Me>('POST', '/auth/login', { username, password }),
@@ -491,7 +518,13 @@ export const api = {
   },
   requestHack: (hackId: string) => call<{ request: GameRequest }>('POST', '/requests', { kind: 'hack', hackId }),
   like: (igdbId: number, liked: boolean, title: string) => call<{ liked: boolean }>('PUT', `/games/${igdbId}/like`, { liked, title }),
-  dismiss: (igdbId: number, dismissed: boolean) => call<{ dismissed: boolean }>('PUT', `/games/${igdbId}/dismiss`, { dismissed }),
+  dismiss: (igdbId: number, dismissed: boolean, title = '') => call<{ dismissed: boolean }>('PUT', `/games/${igdbId}/dismiss`, { dismissed, title }),
+  // Settings
+  taste: () => call<{ liked: TasteItem[]; dismissed: TasteItem[] }>('GET', '/me/taste'),
+  savePrefs: (prefs: Me['prefs']) => call<{ prefs: Me['prefs'] }>('PUT', '/me/preferences', prefs),
+  adminSettings: () => call<AdminSettings>('GET', '/admin/settings'),
+  saveAdminSettings: (settings: Partial<Record<SettingKey, string | number | boolean | null>>) => call<AdminSettings>('PATCH', '/admin/settings', { settings }),
+  testConnection: (what: 'jellyfin' | 'retroarr' | 'romm' | 'discord') => call<{ ok: boolean; message: string }>('POST', `/admin/settings/test/${what}`, {}),
   romm: () => call<RommStatus>('GET', '/me/romm'),
   linkRomm: (token: string) => call<RommStatus>('PUT', '/me/romm', { token }),
   unlinkRomm: () => call<RommStatus>('DELETE', '/me/romm'),
