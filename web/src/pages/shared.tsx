@@ -41,11 +41,28 @@ export function Icon({ name, title }: { name: IconName; title?: string }) {
 }
 
 // The app's mark: a gamepad in a gradient tile
+// The logo: a CRT with a prompt and a search lens (green screen, amber lens), as the favicon draws it
 export function Mark() {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M7.5 7h9a5 5 0 0 1 4.9 6l-.6 3.1a2.8 2.8 0 0 1-4.8 1.4L14.4 16H9.6L8 17.5a2.8 2.8 0 0 1-4.8-1.4L2.6 13A5 5 0 0 1 7.5 7Zm-.25 2.75v1.5h-1.5v1.5h1.5v1.5h1.5v-1.5h1.5v-1.5h-1.5v-1.5h-1.5Zm8.5.25a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm2 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" />
+    <svg viewBox="0 0 32 32" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="4" width="28" height="22" rx="5" stroke="currentColor" />
+      <path d="M7 11l3 3-3 3" stroke="currentColor" />
+      <circle cx="20" cy="14" r="4" className="mark-lens" />
+      <path d="M23 17l3 3" className="mark-lens" />
+      <path d="M11 29h10" stroke="currentColor" />
     </svg>
+  );
+}
+
+// The name with the terminal's blinking cursor after it
+export function Wordmark() {
+  return (
+    <>
+      g-seekr
+      <span className="cursor" aria-hidden="true">
+        _
+      </span>
+    </>
   );
 }
 
