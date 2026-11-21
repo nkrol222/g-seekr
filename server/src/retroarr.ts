@@ -261,6 +261,8 @@ export class RetroArrError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    // The request API's error code (unknown_game, not_in_library, …), when RetroArr sent one
+    readonly code: string | null = null,
   ) {
     super(message);
   }
@@ -313,13 +315,15 @@ export class RetroArrClient {
     }
     if (!res.ok) {
       let message = `RetroArr answered ${res.status}`;
+      let code: string | null = null;
       try {
-        const err = (await res.json()) as { message?: string; error?: string };
+        const err = (await res.json()) as { message?: string; error?: string; code?: unknown };
         message += `: ${err.message ?? err.error ?? ''}`.trimEnd();
+        if (typeof err.code === 'string') code = err.code;
       } catch {
         /* no JSON body */
       }
-      throw new RetroArrError(message, res.status);
+      throw new RetroArrError(message, res.status, code);
     }
     if (res.status === 204) return undefined as T;
     const text = await res.text();
@@ -342,7 +346,8 @@ export class RetroArrClient {
     try {
       r = await this.call<Record<string, unknown>>('POST', '/requests/check', { igdbId, platformId, region: version.region, variant: version.variant });
     } catch (err) {
-      if (err instanceof RetroArrError && err.status === 404) return null;
+      // Only RetroArr saying IGDB has no such game; a 404 without the code is a RetroArr without the request API
+      if (err instanceof RetroArrError && err.status === 404 && err.code === 'unknown_game') return null;
       throw err;
     }
     const g = (r.game ?? {}) as Record<string, unknown>;

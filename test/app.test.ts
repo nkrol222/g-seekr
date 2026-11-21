@@ -1367,3 +1367,15 @@ describe('the RetroArr request API boundary', () => {
     expect(await test()).toMatchObject({ ok: false, message: expect.stringContaining('Update RetroArr') });
   });
 });
+
+describe('an older RetroArr without the request API', () => {
+  it('fails a request plainly instead of calling the game unknown', async () => {
+    await start();
+    const alice = await login('alice');
+    fakes.noRequestApi = true;
+    const res = await built.app.inject({ method: 'POST', url: '/api/requests', headers: alice.headers, payload: { igdbId: 1020, platformId: 41 } });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().code).toBeUndefined();
+    expect(res.json().error).toContain('RetroArr answered 404');
+  });
+});

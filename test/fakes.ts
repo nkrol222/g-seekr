@@ -57,6 +57,8 @@ export class Fakes {
   statesDown = false;
   // RetroArr can't reach IGDB: check and fulfil answer 502
   metadataDown = false;
+  // A RetroArr from before the request API: 404 without a body
+  noRequestApi = false;
   statesCalls = 0;
   requestApiVersion = 1;
   calls: string[] = [];
@@ -154,6 +156,7 @@ export class Fakes {
       }
       // The request API, as RetroArr's RequestApiService does it
       if (path === '/requests/info') return json({ apiVersion: this.requestApiVersion, appVersion: '1.0.0-fake', features: ['check', 'fulfil:game', 'fulfil:addons', 'fulfil:hack', 'states'] });
+      if (path.startsWith('/requests/') && this.noRequestApi) return new Response('', { status: 404 });
       if (path.startsWith('/requests/') && path !== '/requests/states' && this.metadataDown) return json({ code: 'metadata_unavailable', message: 'IGDB couldn’t be asked about the game right now.' }, 502);
       if (path === '/requests/check' && method === 'POST') {
         const g = this.catalogue.get(body.igdbId);
