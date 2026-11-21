@@ -182,7 +182,10 @@ export async function buildApp(deps: AppDeps) {
   };
   // Every admins-only route, as "METHOD /path": the tests send a non-admin to each one
   const adminRoutes: string[] = [];
+  // Every route, for the tests that send each one hostile input
+  const routes: string[] = [];
   app.addHook('onRoute', (route) => {
+    for (const m of [route.method].flat()) if (m !== 'HEAD') routes.push(`${m} ${route.url}`);
     const pre = route.preHandler;
     if (pre === requireAdmin || (Array.isArray(pre) && pre.includes(requireAdmin)))
       for (const m of [route.method].flat()) if (m !== 'HEAD') adminRoutes.push(`${m} ${route.url}`);
@@ -802,7 +805,7 @@ export async function buildApp(deps: AppDeps) {
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found.' }));
   }
 
-  return { app, store, requests, issues, recommend, collections, tasks, settings, adminRoutes };
+  return { app, store, requests, issues, recommend, collections, tasks, settings, adminRoutes, routes };
 }
 
 declare module 'fastify' {

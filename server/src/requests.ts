@@ -482,7 +482,11 @@ export class RequestService {
   }
 
   // release: what was imported, when the webhook says
+  // A poll and RetroArr's webhook can both see the import: whichever comes second finds the request ready already and
+  // doesn't tell the requester again
   private markAvailable(request: GameRequest, gameId: number, release: string | null = null): GameRequest {
+    const current = this.store.request(request.id);
+    if (current?.status === 'available') return current;
     const updated = this.store.updateRequest(request.id, {
       status: 'available',
       retroarrGameId: gameId,
