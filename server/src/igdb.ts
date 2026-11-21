@@ -487,7 +487,6 @@ export class DirectIgdbRetroArrClient extends RetroArrClient {
       coverUrl: g.coverUrl,
       platformIds: g.platformIds,
       owned: g.library.some((l) => l.status === 'Downloaded'),
-      raw: {},
     }));
   }
 }

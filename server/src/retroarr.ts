@@ -1,4 +1,4 @@
-// The RetroArr endpoints a token with the "requests" scope may call.
+// The RetroArr endpoints a token with the "requests" scope may call: the request API (check, fulfil, states) and reads.
 
 export interface RetroArrPlatform {
   id: number;
@@ -60,20 +60,74 @@ export interface RetroArrLookupGame {
   coverUrl: string | null;
   platformIds: number[];
   owned: boolean;
-  // The full metadata object, sent back as is when the game is added
-  raw: Record<string, unknown>;
 }
 
 export type RetroArrGameStatus = 'TBA' | 'Announced' | 'Released' | 'Downloading' | 'Downloaded' | 'Missing' | 'InstallerDetected' | 'Unknown';
 
-export interface RetroArrGame {
-  id: number;
-  title: string;
-  status: RetroArrGameStatus;
-  monitored: boolean;
-  // Which version the entry is (RetroArr's Region and Variant)
+// The request API (RetroArr's api/v3/requests): the contract g-seekr hands requests over through. g-seekr says what a
+// user asked for; RetroArr picks the entry, fetches the metadata, monitors and searches. docs/retroarr-api.md.
+export const REQUEST_API_VERSION = 1;
+
+// wanted: monitored, not in the library yet; unmonitored: not looked for; removed: the entry is gone
+export type RequestState = 'wanted' | 'downloading' | 'available' | 'unmonitored' | 'removed';
+
+// One of the library's entries of a game: which version it is and where it stands
+export interface RequestEntry {
+  gameId: number;
+  state: RequestState;
   region: string;
   variant: string;
+}
+
+export interface RequestCheck {
+  game: { igdbId: number; title: string; year: number | null; coverUrl: string | null; platformIds: number[] };
+  entries: RequestEntry[];
+  // The entry that is the version asked for, and whether it's in the library
+  match: RequestEntry | null;
+  owned: boolean;
+}
+
+export type FulfilAsk =
+  | { kind: 'game'; igdbId: number; platformId: number; region: string; variant: string; latestRevision: boolean; addOns?: AddOnWants }
+  | { kind: 'addons'; igdbId: number; platformId: number; region: string; variant: string; addOns: AddOnWants }
+  | { kind: 'hack'; hackId: string };
+
+export interface AddOnWants {
+  latestUpdate: boolean;
+  allDlc: boolean;
+  dlc: { igdbId: number | null; title: string }[];
+}
+
+export interface Fulfilled {
+  gameId: number;
+  state: RequestState;
+  // A new entry was made for it
+  added: boolean;
+  // A ROM hack's game
+  baseGameId: number | null;
+  baseState: RequestState | null;
+}
+
+export interface RequestApiInfo {
+  apiVersion: number;
+  appVersion: string | null;
+  features: string[];
+}
+
+const STATES: RequestState[] = ['wanted', 'downloading', 'available', 'unmonitored', 'removed'];
+
+function requestState(v: unknown): RequestState {
+  return STATES.find((s) => s === v) ?? 'wanted';
+}
+
+function toEntry(e: unknown): RequestEntry {
+  const o = (e ?? {}) as Record<string, unknown>;
+  return {
+    gameId: Number(o.gameId),
+    state: requestState(o.state),
+    region: typeof o.region === 'string' ? o.region : '',
+    variant: typeof o.variant === 'string' ? o.variant : '',
+  };
 }
 
 // What the library has of a game on a platform, and which version it is
@@ -207,6 +261,8 @@ export class RetroArrError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    // The request API's error code (unknown_game, not_in_library, …), when RetroArr sent one
+    readonly code: string | null = null,
   ) {
     super(message);
   }
@@ -231,18 +287,6 @@ function toLookupGame(g: Record<string, unknown>): RetroArrLookupGame {
     coverUrl: typeof images.coverUrl === 'string' ? images.coverUrl : null,
     platformIds: Array.isArray(g.availablePlatformIds) ? g.availablePlatformIds.filter((n): n is number => typeof n === 'number') : [],
     owned: g.isOwned === true,
-    raw: g,
-  };
-}
-
-function toGame(g: Record<string, unknown>): RetroArrGame {
-  return {
-    id: Number(g.id),
-    title: String(g.title ?? ''),
-    status: gameStatus(g.status),
-    monitored: g.monitored === true,
-    region: typeof g.region === 'string' ? g.region : '',
-    variant: typeof g.variant === 'string' ? g.variant : '',
   };
 }
 
@@ -271,21 +315,77 @@ export class RetroArrClient {
     }
     if (!res.ok) {
       let message = `RetroArr answered ${res.status}`;
+      let code: string | null = null;
       try {
-        const err = (await res.json()) as { message?: string; error?: string };
+        const err = (await res.json()) as { message?: string; error?: string; code?: unknown };
         message += `: ${err.message ?? err.error ?? ''}`.trimEnd();
+        if (typeof err.code === 'string') code = err.code;
       } catch {
         /* no JSON body */
       }
-      throw new RetroArrError(message, res.status);
+      throw new RetroArrError(message, res.status, code);
     }
     if (res.status === 204) return undefined as T;
     const text = await res.text();
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
-  async status(): Promise<{ version?: string }> {
-    return this.call('GET', '/system/status');
+  // What RetroArr's request API speaks; RetroArrError 404 from a RetroArr that predates it
+  async info(): Promise<RequestApiInfo> {
+    const i = await this.call<Record<string, unknown>>('GET', '/requests/info');
+    return {
+      apiVersion: typeof i.apiVersion === 'number' ? i.apiVersion : 0,
+      appVersion: typeof i.appVersion === 'string' ? i.appVersion : null,
+      features: Array.isArray(i.features) ? i.features.filter((f): f is string => typeof f === 'string') : [],
+    };
+  }
+
+  // The game on IGDB and what the library has of it on the platform, in that version. null: IGDB has no such game.
+  async check(igdbId: number, platformId: number, version: { region: string; variant: string }): Promise<RequestCheck | null> {
+    let r: Record<string, unknown>;
+    try {
+      r = await this.call<Record<string, unknown>>('POST', '/requests/check', { igdbId, platformId, region: version.region, variant: version.variant });
+    } catch (err) {
+      // Only RetroArr saying IGDB has no such game; a 404 without the code is a RetroArr without the request API
+      if (err instanceof RetroArrError && err.status === 404 && err.code === 'unknown_game') return null;
+      throw err;
+    }
+    const g = (r.game ?? {}) as Record<string, unknown>;
+    return {
+      game: {
+        igdbId: Number(g.igdbId ?? igdbId),
+        title: String(g.title ?? ''),
+        year: typeof g.year === 'number' && g.year > 0 ? g.year : null,
+        coverUrl: typeof g.coverUrl === 'string' ? g.coverUrl : null,
+        platformIds: Array.isArray(g.platformIds) ? g.platformIds.filter((n): n is number => typeof n === 'number') : [],
+      },
+      entries: (Array.isArray(r.entries) ? r.entries : []).map(toEntry),
+      match: r.match ? toEntry(r.match) : null,
+      owned: r.owned === true,
+    };
+  }
+
+  // Does what an approved request asks. Adding a game and its metadata can take a while on a cold IGDB cache.
+  async fulfil(ask: FulfilAsk): Promise<Fulfilled> {
+    const r = await this.call<Record<string, unknown>>('POST', '/requests/fulfil', ask, 60_000);
+    return {
+      gameId: Number(r.gameId),
+      state: requestState(r.state),
+      added: r.added === true,
+      baseGameId: typeof r.baseGameId === 'number' ? r.baseGameId : null,
+      baseState: r.baseState == null ? null : requestState(r.baseState),
+    };
+  }
+
+  // Where each entry stands, asked 500 at a time
+  async states(gameIds: number[]): Promise<Map<number, RequestEntry>> {
+    const out = new Map<number, RequestEntry>();
+    const ids = [...new Set(gameIds)];
+    for (let i = 0; i < ids.length; i += 500) {
+      const r = await this.call<{ games?: unknown[] }>('POST', '/requests/states', { gameIds: ids.slice(i, i + 500) });
+      for (const e of (r.games ?? []).map(toEntry)) out.set(e.gameId, e);
+    }
+    return out;
   }
 
   async platforms(): Promise<RetroArrPlatform[]> {
@@ -306,36 +406,10 @@ export class RetroArrClient {
     return (res.games ?? []).map(toLookupGame);
   }
 
-  async lookupIgdb(igdbId: number): Promise<RetroArrLookupGame | null> {
-    try {
-      return toLookupGame(await this.call<Record<string, unknown>>('GET', `/game/lookup/igdb/${igdbId}`));
-    } catch (err) {
-      if (err instanceof RetroArrError && err.status === 404) return null;
-      throw err;
-    }
-  }
 
-  async findByIgdb(igdbId: number, platformId: number): Promise<RetroArrGame[]> {
-    const list = await this.call<Array<Record<string, unknown>>>('GET', `/game/by-igdb/${igdbId}?platformId=${platformId}`);
-    return list.map(toGame);
-  }
 
-  async getGame(id: number): Promise<RetroArrGame | null> {
-    try {
-      return toGame(await this.call<Record<string, unknown>>('GET', `/game/${id}`));
-    } catch (err) {
-      if (err instanceof RetroArrError && err.status === 404) return null;
-      throw err;
-    }
-  }
 
-  async addGame(game: Record<string, unknown>): Promise<RetroArrGame> {
-    return toGame(await this.call<Record<string, unknown>>('POST', '/game', game));
-  }
 
-  async setMonitored(id: number, monitored: boolean): Promise<void> {
-    await this.call('PUT', `/games/${id}/monitored`, { monitored });
-  }
 
   // What the download client is doing for these games: the release, how far along, RetroArr's view of it
   async progress(gameIds: number[]): Promise<RetroArrProgress[]> {
@@ -540,14 +614,6 @@ export class RetroArrClient {
     };
   }
 
-  // Adds to what RetroArr wants of the game's updates and DLC: never turns off what it wanted already. search: look
-  // for them now (the game is in the library)
-  async addAddOns(id: number, wants: { latestUpdate: boolean; allDlc: boolean; dlc: { igdbId: number | null; title: string }[] }, search: boolean): Promise<void> {
-    const body: Record<string, unknown> = { dlc: wants.dlc, append: true, search };
-    if (wants.latestUpdate) body.wantLatestUpdate = true;
-    if (wants.allDlc) body.wantAllDlc = true;
-    await this.call('PUT', `/games/${id}/addons`, body, 180_000);
-  }
 
   async romHacks(): Promise<RomHackInfo[]> {
     const list = await this.call<Array<Record<string, unknown>>>('GET', '/romhacks');
@@ -572,15 +638,11 @@ export class RetroArrClient {
       baseStatus: str(h.baseStatus),
     }));
   }
-
-  // Adds the hack (and its game when the library lacks it) to RetroArr, which patches it once the game is in
-  async requestRomHack(id: string): Promise<{ hackGameId: number; baseGameId: number; baseStatus: string }> {
-    const r = await this.call<Record<string, unknown>>('POST', `/romhacks/${encodeURIComponent(id)}/request`, {});
-    return { hackGameId: Number(r.hackGameId), baseGameId: Number(r.baseGameId), baseStatus: String(r.baseStatus ?? '') };
-  }
-
-  // Searches the indexers and grabs a release that scores high enough. Can take a while.
-  async searchNow(id: number): Promise<void> {
-    await this.call('POST', `/games/${id}/search-now?autoDispatch=true`, undefined, 180_000);
-  }
 }
+
+// What the request lifecycle needs of RetroArr: the request API, plus reads for search results, progress and
+// add-ons. RequestService depends on this, not on the whole client, so the boundary stays this narrow.
+export type RequestBackend = Pick<
+  RetroArrClient,
+  'platforms' | 'lookup' | 'check' | 'fulfil' | 'states' | 'getAddOns' | 'progress' | 'searchStatus' | 'libraryOf'
+>;

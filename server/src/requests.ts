@@ -1,7 +1,7 @@
-import { DEFAULT_VERSION, entryMatches, versionLabel, type Version } from './versions.js';
+import { DEFAULT_VERSION, versionLabel, type Version } from './versions.js';
 import type { Config } from './config.js';
 import type { Notifier } from './notify.js';
-import { RetroArrError, type RetroArrAddOns, type RetroArrClient, type RetroArrGame, type RetroArrPlatform, type RomHackInfo } from './retroarr.js';
+import { RetroArrError, type Fulfilled, type RequestBackend, type RetroArrAddOns, type RetroArrPlatform, type RomHackInfo } from './retroarr.js';
 import { buildTimeline, forUser, type Timeline } from './timeline.js';
 import { hasAddOns, NO_ADDONS, TRACKED_STATUSES, type AddOns, type GameRequest, type RequestKind, type RequestStatus, type Store, type User } from './store.js';
 
@@ -46,7 +46,7 @@ export class RequestService {
   constructor(
     private readonly config: Config,
     private readonly store: Store,
-    private readonly retroarr: RetroArrClient,
+    private readonly retroarr: RequestBackend,
     private readonly notifier: Notifier,
     private readonly log: Logger,
     private readonly now: () => Date = () => new Date(),
@@ -134,18 +134,17 @@ export class RequestService {
       throw new RequestError(`You can make ${limit} requests every ${days} days. Try again later.`, 429, 'limit_reached');
     }
 
-    const meta = await this.retroarr.lookupIgdb(igdbId);
-    if (!meta) throw new RequestError('That game wasn’t found on IGDB.', 404, 'unknown_game');
+    // RetroArr says what the game is and whether the library has that version
+    const check = await this.retroarr.check(igdbId, platformId, version);
+    if (!check) throw new RequestError('That game wasn’t found on IGDB.', 404, 'unknown_game');
+    const meta = check.game;
     if (meta.platformIds.length > 0 && !meta.platformIds.includes(platformId)) {
       throw new RequestError(`${meta.title} isn’t available for ${platform.name}.`, 400, 'wrong_platform');
     }
-
-    const inLibrary = await this.retroarr.findByIgdb(igdbId, platformId);
-    const owned = inLibrary.some((g) => g.status === 'Downloaded' && entryMatches(version, g));
-    if (kind === 'game' && owned) {
+    if (kind === 'game' && check.owned) {
       throw new RequestError(`${meta.title} is already in the library for ${platform.name}${which ? ` (${which})` : ''}.`, 409, 'in_library');
     }
-    if (kind === 'addons' && !owned) {
+    if (kind === 'addons' && !check.owned) {
       throw new RequestError(`${meta.title} isn’t in the library for ${platform.name} yet: request the game with its DLC instead.`, 409, 'not_in_library');
     }
 
@@ -157,7 +156,7 @@ export class RequestService {
         platformId,
         platformName: platform.name,
         title: meta.title,
-        year: meta.year || null,
+        year: meta.year,
         coverUrl: meta.coverUrl,
         version,
         kind,
@@ -259,44 +258,32 @@ export class RequestService {
     this.log.info(`request ${id}: removed by ${user.username}`);
   }
 
-  // Adds the game to RetroArr (or reuses the entry it already has), monitors it and starts a
-  // search. The search runs on its own: indexers can take minutes and RetroArr's monitored
-  // sweep searches again later anyway.
+  // Hands an approved request to RetroArr's request API, which adds the game (or uses the entry it has for that
+  // version), monitors it and starts a search on its own: indexers can take minutes and RetroArr's sweep searches
+  // again later anyway.
   async handOff(request: GameRequest): Promise<GameRequest> {
     try {
-      // RetroArr's entry for this version: the one it has, or a new one (another region or the translation is an entry of
-      // its own beside the others)
-      if (request.kind === 'hack') return await this.handOffHack(request);
-      const version = { region: request.region, variant: request.variant as Version['variant'], latestRevision: request.latestRevision };
-      let game: RetroArrGame | undefined = (await this.retroarr.findByIgdb(request.igdbId, request.platformId)).find((g) => entryMatches(version, g));
-      if (request.kind === 'addons') return await this.handOffAddOns(request, game);
-      if (!game) {
-        const meta = await this.retroarr.lookupIgdb(request.igdbId);
-        const body: Record<string, unknown> = {
-          ...(meta?.raw ?? { title: request.title, igdbId: request.igdbId, year: request.year ?? 0 }),
-          platformId: request.platformId,
-          monitored: true,
-          region: version.region,
-          variant: version.variant,
-          preferLatestRevision: version.latestRevision,
-        };
-        for (const key of ['id', 'platform', 'path', 'status', 'gameFiles', 'isOwned', 'availablePlatforms', 'availablePlatformIds']) delete body[key];
-        game = await this.retroarr.addGame(body);
+      if (request.kind === 'hack') {
+        const r = await this.retroarr.fulfil({ kind: 'hack', hackId: request.variant.slice('hack:'.length) });
+        this.log.info(`request ${request.id}: ROM hack in RetroArr as game ${r.gameId}; its game ${r.baseGameId} is ${r.baseState}`);
+        return this.follow(request, r);
+      }
+      const version = { igdbId: request.igdbId, platformId: request.platformId, region: request.region, variant: request.variant };
+      if (request.kind === 'addons') {
+        const r = await this.retroarr.fulfil({ kind: 'addons', ...version, addOns: request.addOns });
+        const updated = this.store.updateRequest(request.id, { status: 'searching', retroarrGameId: r.gameId, release: null, error: null })!;
+        this.log.info(`request ${request.id}: updates and DLC asked of RetroArr for game ${r.gameId}`);
+        return this.checkAddOns(updated);
       }
       // The updates and DLC asked with the game: RetroArr fetches them once the game is in
-      if (hasAddOns(request.addOns)) await this.retroarr.addAddOns(game.id, request.addOns, game.status === 'Downloaded');
-      if (game.status === 'Downloaded') return this.markAvailable(request, game.id);
-
-      await this.retroarr.setMonitored(game.id, true);
-      const updated = this.store.updateRequest(request.id, {
-        status: game.status === 'Downloading' ? 'downloading' : 'searching',
-        retroarrGameId: game.id,
-        release: null,
-        error: null,
-      })!;
-      this.log.info(`request ${request.id}: in RetroArr as game ${game.id}, searching`);
-      this.retroarr.searchNow(game.id).catch((err: Error) => this.log.warn(`request ${request.id}: search-now failed: ${err.message}`));
-      return updated;
+      const r = await this.retroarr.fulfil({
+        kind: 'game',
+        ...version,
+        latestRevision: request.latestRevision,
+        ...(hasAddOns(request.addOns) ? { addOns: request.addOns } : {}),
+      });
+      this.log.info(`request ${request.id}: in RetroArr as game ${r.gameId}${r.added ? ' (added)' : ''}, ${r.state}`);
+      return this.follow(request, r);
     } catch (err) {
       const message = err instanceof RetroArrError ? err.message : `Unexpected error: ${(err as Error).message}`;
       this.log.error(`request ${request.id}: hand-off to RetroArr failed: ${message}`);
@@ -306,21 +293,15 @@ export class RequestService {
     }
   }
 
-  // A ROM hack: RetroArr adds it (and searches for its game when needed); the poller follows the hack's entry
-  private async handOffHack(request: GameRequest): Promise<GameRequest> {
-    const r = await this.retroarr.requestRomHack(request.variant.slice('hack:'.length));
-    const updated = this.store.updateRequest(request.id, { status: 'searching', retroarrGameId: r.hackGameId, release: null, error: null })!;
-    this.log.info(`request ${request.id}: ROM hack in RetroArr as game ${r.hackGameId}; its game ${r.baseGameId} is ${r.baseStatus}`);
-    return updated;
-  }
-
-  // An add-on request: RetroArr adds them to what it wants of the game and searches at once
-  private async handOffAddOns(request: GameRequest, game: RetroArrGame | undefined): Promise<GameRequest> {
-    if (!game || game.status !== 'Downloaded') throw new RetroArrError('The game is no longer in the library, so its updates and DLC can’t be fetched.', 409);
-    await this.retroarr.addAddOns(game.id, request.addOns, true);
-    const updated = this.store.updateRequest(request.id, { status: 'searching', retroarrGameId: game.id, release: null, error: null })!;
-    this.log.info(`request ${request.id}: updates and DLC asked of RetroArr for game ${game.id}`);
-    return this.checkAddOns(updated);
+  // The request's status from what RetroArr said of its entry
+  private follow(request: GameRequest, r: Pick<Fulfilled, 'gameId' | 'state'>): GameRequest {
+    if (r.state === 'available') return this.markAvailable(request, r.gameId);
+    return this.store.updateRequest(request.id, {
+      status: r.state === 'downloading' ? 'downloading' : 'searching',
+      retroarrGameId: r.gameId,
+      release: null,
+      error: null,
+    })!;
   }
 
   // Whether everything an add-on request asked for is in: each DLC (by IGDB id, or by name), the DLC pack, an update
@@ -337,11 +318,23 @@ export class RequestService {
     return RequestService.addOnsDone(request.addOns, have) ? this.markAvailable(request, request.retroarrGameId) : request;
   }
 
-  // One pass of the poller: follow every request RetroArr is working on. Returns a summary for the Tasks page.
+  // One pass of the poller: follow every request RetroArr is working on, the states of all their entries in one call.
+  // Returns a summary for the Tasks page.
   async poll(): Promise<string> {
-    const tracked = this.store.listRequests({ statuses: TRACKED_STATUSES });
+    const tracked = this.store.listRequests({ statuses: TRACKED_STATUSES, limit: null });
     let changed = 0;
     let errors = 0;
+    const followed = tracked.filter((r) => r.retroarrGameId !== null && r.kind !== 'addons');
+    let states: Awaited<ReturnType<RequestBackend['states']>> | null = null;
+    if (followed.length > 0) {
+      try {
+        states = await this.retroarr.states(followed.map((r) => r.retroarrGameId!));
+      } catch (err) {
+        // RetroArr down: leave the requests as they are and try again next time
+        errors += followed.length;
+        this.log.warn(`poll: ${(err as Error).message}`);
+      }
+    }
     for (const request of tracked) {
       try {
         if (request.retroarrGameId === null) {
@@ -353,25 +346,26 @@ export class RequestService {
           if ((await this.checkAddOns(request)).status === 'available') changed++;
           continue;
         }
-        const game = await this.retroarr.getGame(request.retroarrGameId);
-        if (!game) {
+        if (!states) continue;
+        const entry = states.get(request.retroarrGameId);
+        if (!entry || entry.state === 'removed') {
           const failed = this.store.updateRequest(request.id, { status: 'failed', error: 'The game was removed from RetroArr.' })!;
           void this.notifier.statusChanged(failed);
+          changed++;
           continue;
         }
-        const next: RequestStatus = game.status === 'Downloaded' ? 'available' : game.status === 'Downloading' ? 'downloading' : 'searching';
-        // RetroArr's game status says nothing of a grab: a request a webhook marked downloading stays so
-        // until the import or failure webhook (or the import itself) moves it on
+        const next: RequestStatus = entry.state === 'available' ? 'available' : entry.state === 'downloading' ? 'downloading' : 'searching';
+        // RetroArr's entry says nothing of a grab: a request a webhook marked downloading stays so until the import or
+        // failure webhook (or the import itself) moves it on
         const grabbed = request.status === 'downloading' && request.release !== null && next === 'searching';
         if (next === 'available') {
-          this.markAvailable(request, game.id);
+          this.markAvailable(request, entry.gameId);
           changed++;
         } else if (next !== request.status && !grabbed) {
           this.store.updateRequest(request.id, { status: next });
           changed++;
         }
       } catch (err) {
-        // RetroArr down: leave the request as it is and try again next time
         errors++;
         this.log.warn(`poll: request ${request.id}: ${(err as Error).message}`);
       }
@@ -385,7 +379,7 @@ export class RequestService {
   async linkRomm(): Promise<number> {
     const since = this.now().getTime() - ROMM_LINK_DAYS * 86_400_000;
     const waiting = this.store
-      .listRequests({ statuses: ['available'] })
+      .listRequests({ statuses: ['available'], limit: null })
       .filter((r) => r.rommId === null && r.retroarrGameId !== null && (!r.availableAt || new Date(r.availableAt).getTime() >= since));
     if (waiting.length === 0) return 0;
     const library = await this.retroarr.libraryOf([...new Set(waiting.map((r) => r.igdbId))]);
@@ -400,7 +394,7 @@ export class RequestService {
   }
 
   waitingForRomm(): number {
-    return this.store.listRequests({ statuses: ['available'] }).filter((r) => r.rommId === null && r.retroarrGameId !== null).length;
+    return this.store.listRequests({ statuses: ['available'], limit: null }).filter((r) => r.rommId === null && r.retroarrGameId !== null).length;
   }
 
   // RetroArr's webhooks, for every request it is working on for that game. The poller stays as the backstop for a
@@ -408,9 +402,7 @@ export class RequestService {
   handleRetroArrEvent(event: string, data: RetroArrEventData): number {
     const gameId = typeof data.gameId === 'number' ? data.gameId : null;
     if (gameId === null) return 0;
-    const affected = this.store
-      .listRequests({ statuses: TRACKED_STATUSES })
-      .filter((r) => r.retroarrGameId === gameId);
+    const affected = this.store.listRequests({ statuses: TRACKED_STATUSES, retroarrGameId: gameId, limit: null });
     const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     for (const request of affected) {
       switch (event) {
@@ -450,7 +442,7 @@ export class RequestService {
   async progress(user: User, all: boolean, replacingGameIds: number[] = []) {
     const mine = all && this.isAdmin(user) ? {} : { userId: user.id };
     const ids = new Set<number>(replacingGameIds);
-    for (const r of this.store.listRequests({ ...mine, statuses: ['searching', 'downloading'] })) {
+    for (const r of this.store.listRequests({ ...mine, statuses: ['searching', 'downloading'], limit: null })) {
       if (r.retroarrGameId !== null) ids.add(r.retroarrGameId);
     }
     if (ids.size === 0) return { progress: [] };
@@ -467,7 +459,7 @@ export class RequestService {
   // leaves out the search detail.
   async timelines(list: GameRequest[], admin: boolean): Promise<Map<number, Timeline>> {
     const hunting = list.filter((r) => r.status === 'searching' && r.retroarrGameId !== null).map((r) => r.retroarrGameId!);
-    let status: Awaited<ReturnType<RetroArrClient['searchStatus']>> | null = null;
+    let status: Awaited<ReturnType<RequestBackend['searchStatus']>> | null = null;
     if (hunting.length > 0) {
       try {
         status = await this.retroarr.searchStatus([...new Set(hunting)]);

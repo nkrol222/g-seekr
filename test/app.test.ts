@@ -164,11 +164,11 @@ describe('requests', () => {
     const approved = await built.app.inject({ method: 'POST', url: `/api/requests/${id}/approve`, headers: root.headers, payload: { note: 'enjoy' } });
     expect(approved.json().request).toMatchObject({ status: 'searching', retroarrGameId: 100, note: 'enjoy' });
     await flush();
+    // Handed over through the request API: what was asked for, never a game model
+    expect(fakes.fulfilBodies).toEqual([{ kind: 'game', igdbId: 1020, platformId: 41, region: '', variant: '', latestRevision: false }]);
     expect(fakes.addedBodies[0]).toMatchObject({ title: 'Chrono Trigger', igdbId: 1020, platformId: 41, monitored: true });
-    expect(fakes.addedBodies[0]).not.toHaveProperty('id');
-    expect(fakes.addedBodies[0]).not.toHaveProperty('platform');
-    expect(fakes.calls).toContain('PUT /games/100/monitored');
-    expect(fakes.calls).toContain('POST /games/100/search-now?autoDispatch=true');
+    expect(fakes.searched).toEqual([100]);
+    expect(fakes.calls.filter((c) => !c.startsWith('GET ') && !c.startsWith('POST /requests/'))).toEqual([]);
 
     fakes.games[0]!.status = 3;
     await built.requests.poll();
@@ -259,9 +259,9 @@ describe('requests', () => {
 
     await built.app.inject({ method: 'POST', url: `/api/requests/${created.json().request.id}/approve`, headers: root.headers, payload: {} });
     await flush();
-    expect(fakes.addOnPuts).toEqual([
-      { gameId: 100, body: { dlc: [{ igdbId: 900, title: 'Expansion Pass' }], append: true, search: false, wantLatestUpdate: true } },
-    ]);
+    expect(fakes.fulfilBodies[0]).toMatchObject({ kind: 'game', addOns: { latestUpdate: true, allDlc: false, dlc: [{ igdbId: 900, title: 'Expansion Pass' }] } });
+    // not in the library yet: wanted, searched with the game
+    expect(fakes.addOnWants).toEqual([{ gameId: 100, addOns: { latestUpdate: true, allDlc: false, dlc: [{ igdbId: 900, title: 'Expansion Pass' }] }, search: false }]);
 
     // A platform without updates or DLC: the add-ons are left out
     const snes = await post({ igdbId: 1020, platformId: 41, latestUpdate: true, allDlc: true });
@@ -285,7 +285,8 @@ describe('requests', () => {
     expect(created.statusCode).toBe(201);
     // an admin's request goes straight to RetroArr, which searches at once
     expect(created.json().request).toMatchObject({ kind: 'addons', status: 'searching', retroarrGameId: 7 });
-    expect(fakes.addOnPuts[0]).toEqual({ gameId: 7, body: { dlc: [{ igdbId: 900, title: 'Expansion Pass' }], append: true, search: true } });
+    expect(fakes.fulfilBodies[0]).toEqual({ kind: 'addons', igdbId: 7346, platformId: 70, region: '', variant: '', addOns: { latestUpdate: false, allDlc: false, dlc: [{ igdbId: 900, title: 'Expansion Pass' }] } });
+    expect(fakes.addOnWants[0]).toMatchObject({ gameId: 7, search: true });
     expect((await post(alice.headers, { allDlc: true })).json().code).toBe('already_requested');
     // the game itself is still in the library
     expect((await post(alice.headers, { kind: 'game' })).json().code).toBe('in_library');
@@ -333,7 +334,7 @@ describe('requests', () => {
     const id = created.json().request.id;
     const approved = await built.app.inject({ method: 'POST', url: `/api/requests/${id}/approve`, headers: root.headers, payload: {} });
     expect(approved.json().request).toMatchObject({ status: 'searching', retroarrGameId: 100 });
-    expect(fakes.calls).toContain('POST /romhacks/chrono-plus/request');
+    expect(fakes.fulfilBodies).toEqual([{ kind: 'hack', hackId: 'chrono-plus' }]);
     expect((await built.app.inject({ url: '/api/romhacks?igdbId=1020', headers: alice.headers })).json().hacks[0]).toMatchObject({ status: 'searching', requestId: id });
 
     await built.requests.poll();
@@ -380,11 +381,11 @@ describe('requests', () => {
   it('marks a request failed when RetroArr refuses the game, and retries it', async () => {
     await start();
     const root = await login('root');
-    fakes.failAdd = 'duplicate title';
+    fakes.failFulfil = 'duplicate title';
     const res = await built.app.inject({ method: 'POST', url: '/api/requests', headers: root.headers, payload: { igdbId: 1020, platformId: 41 } });
     expect(res.json().request).toMatchObject({ status: 'failed', error: expect.stringContaining('duplicate title') });
 
-    fakes.failAdd = null;
+    fakes.failFulfil = null;
     const retried = await built.app.inject({ method: 'POST', url: `/api/requests/${res.json().request.id}/retry`, headers: root.headers, payload: {} });
     expect(retried.json().request).toMatchObject({ status: 'searching', error: null });
   });
@@ -1263,5 +1264,118 @@ describe('settings', () => {
     expect(taste.liked.map((l: { title: string }) => l.title)).toEqual(['Super Metroid']);
     expect(taste.dismissed.map((d: { igdbId: number; title: string }) => [d.igdbId, d.title]).sort()).toEqual([[1026, 'Zelda'], [427, 'Final Fantasy VII']]);
     expect((await built.app.inject({ url: '/api/me/taste', headers: bob })).json()).toEqual({ liked: [], dismissed: [] });
+  });
+});
+
+describe('the RetroArr request API boundary', () => {
+  const ask = (h: Record<string, string>, payload: Record<string, unknown>) => built.app.inject({ method: 'POST', url: '/api/requests', headers: h, payload });
+
+  it('asks RetroArr which entry is which version: owned only in that version, a new version gets its own entry', async () => {
+    await start();
+    fakes.games.push({ id: 7, title: 'Chrono Trigger', igdbId: 1020, platformId: 41, status: 4, monitored: false, region: 'USA, Europe', variant: '' });
+    const root = await login('root');
+    expect((await ask(root.headers, { igdbId: 1020, platformId: 41, region: 'Europe' })).json().code).toBe('in_library');
+    expect((await ask(root.headers, { igdbId: 1020, platformId: 41 })).json().code).toBe('in_library');
+    const japan = await ask(root.headers, { igdbId: 1020, platformId: 41, region: 'Japan' });
+    expect(japan.json().request).toMatchObject({ status: 'searching', retroarrGameId: 100 });
+    expect(fakes.games.find((g) => g.id === 7)!.monitored).toBe(false);
+    expect(fakes.addedBodies).toEqual([expect.objectContaining({ region: 'Japan', variant: '' })]);
+  });
+
+  it('marks a request ready at once when RetroArr has that version already (the request raced an import)', async () => {
+    await start();
+    const alice = await login('alice');
+    const root = await login('root');
+    const id = (await ask(alice.headers, { igdbId: 427, platformId: 50 })).json().request.id;
+    fakes.games.push({ id: 9, title: 'Final Fantasy VII', igdbId: 427, platformId: 50, status: 4, monitored: true });
+    const approved = await built.app.inject({ method: 'POST', url: `/api/requests/${id}/approve`, headers: root.headers, payload: {} });
+    expect(approved.json().request).toMatchObject({ status: 'available', retroarrGameId: 9 });
+    expect(fakes.searched).toEqual([]);
+  });
+
+  it('says plainly when IGDB is down or the game is unknown, and records nothing', async () => {
+    await start();
+    const alice = await login('alice');
+    expect((await ask(alice.headers, { igdbId: 999999, platformId: 41 })).json().code).toBe('unknown_game');
+    fakes.metadataDown = true;
+    const res = await ask(alice.headers, { igdbId: 1020, platformId: 41 });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error).toBe('IGDB couldn’t be asked about the game right now.');
+    fakes.metadataDown = false;
+    expect(built.store.listRequests({})).toHaveLength(0);
+  });
+
+  it('follows hundreds of open requests with a few batched state calls, and fails the ones whose entry is gone', async () => {
+    await start();
+    const root = await login('root');
+    // 1200 requests RetroArr is working on, as the hand-off left them
+    const owner = (await built.app.inject({ url: '/api/me', headers: root.headers })).json().user.id;
+    for (let i = 0; i < 1200; i++) {
+      const gameId = 1000 + i;
+      fakes.games.push({ id: gameId, title: `Game ${i}`, igdbId: 50000 + i, platformId: 41, status: i % 4 === 0 ? 4 : i % 4 === 1 ? 3 : 0, monitored: true });
+      const r = built.store.createRequest({ userId: owner, igdbId: 50000 + i, platformId: 41, platformName: 'Super Nintendo', title: `Game ${i}`, year: null, coverUrl: null, version: { region: '', variant: '', latestRevision: false }, kind: 'game' });
+      built.store.updateRequest(r.id, { status: 'searching', retroarrGameId: gameId });
+    }
+    // one removed in RetroArr
+    fakes.games = fakes.games.filter((g) => g.id !== 1002);
+    const started = Date.now();
+    const summary = await built.requests.poll();
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(fakes.statesCalls).toBe(3);
+    expect(summary).toMatch(/^1200 open request\(s\) checked/);
+    const byStatus = (s: string) => built.store.listRequests({ statuses: [s as never], limit: null }).length;
+    expect(byStatus('available')).toBe(300);
+    expect(byStatus('downloading')).toBe(300);
+    expect(byStatus('failed')).toBe(1);
+    expect(byStatus('searching')).toBe(599);
+  });
+
+  it('leaves requests alone while RetroArr is down, and the task says so', async () => {
+    await start();
+    const root = await login('root');
+    const id = (await ask(root.headers, { igdbId: 1020, platformId: 41 })).json().request.id;
+    fakes.statesDown = true;
+    await expect(built.requests.poll()).rejects.toThrow(/couldn’t be asked about any of the 1 open requests/);
+    expect(built.store.request(id)!.status).toBe('searching');
+    fakes.statesDown = false;
+    fakes.games[0]!.status = 4;
+    await built.requests.poll();
+    expect(built.store.request(id)!.status).toBe('available');
+  });
+
+  it('retries a failed hand-off through the same API without making a second entry', async () => {
+    await start();
+    const root = await login('root');
+    fakes.failFulfil = 'RetroArr hiccup';
+    const id = (await ask(root.headers, { igdbId: 1020, platformId: 41 })).json().request.id;
+    fakes.failFulfil = null;
+    await built.app.inject({ method: 'POST', url: `/api/requests/${id}/retry`, headers: root.headers, payload: {} });
+    await built.app.inject({ method: 'PATCH', url: `/api/requests/${id}`, headers: root.headers, payload: {} });
+    await built.requests.poll();
+    expect(fakes.games.filter((g) => g.igdbId === 1020)).toHaveLength(1);
+    expect(fakes.fulfilBodies).toHaveLength(2);
+  });
+
+  it('checks the request API version in Settings → Connections', async () => {
+    await start();
+    const root = await login('root');
+    const test = async () => (await built.app.inject({ method: 'POST', url: '/api/admin/settings/test/retroarr', headers: root.headers })).json();
+    expect(await test()).toMatchObject({ ok: true, message: expect.stringContaining('request API matches') });
+    fakes.requestApiVersion = 2;
+    expect(await test()).toMatchObject({ ok: false, message: expect.stringContaining('Update g-seekr') });
+    fakes.requestApiVersion = 0;
+    expect(await test()).toMatchObject({ ok: false, message: expect.stringContaining('Update RetroArr') });
+  });
+});
+
+describe('an older RetroArr without the request API', () => {
+  it('fails a request plainly instead of calling the game unknown', async () => {
+    await start();
+    const alice = await login('alice');
+    fakes.noRequestApi = true;
+    const res = await built.app.inject({ method: 'POST', url: '/api/requests', headers: alice.headers, payload: { igdbId: 1020, platformId: 41 } });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().code).toBeUndefined();
+    expect(res.json().error).toContain('RetroArr answered 404');
   });
 });

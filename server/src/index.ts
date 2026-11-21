@@ -4,22 +4,24 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { openDb } from './db.js';
 import { JellyfinClient } from './jellyfin.js';
-import { RetroArrClient } from './retroarr.js';
+import { REQUEST_API_VERSION, RetroArrClient } from './retroarr.js';
 import { DirectIgdbRetroArrClient, IgdbApi } from './igdb.js';
 
 const config = loadConfig();
 const db = openDb(join(config.dataDir, 'g-seekr.db'));
 const here = dirname(fileURLToPath(import.meta.url));
 
+// With g-seekr's own IGDB app, the lists and game pages come straight from IGDB; the library and actions from RetroArr
+const retroarr =
+  config.igdbClientId && config.igdbClientSecret
+    ? new DirectIgdbRetroArrClient(config.retroarrUrl, config.retroarrToken, new IgdbApi(config.igdbClientId, config.igdbClientSecret, db))
+    : new RetroArrClient(config.retroarrUrl, config.retroarrToken);
+
 const { app, requests, collections, tasks } = await buildApp({
   config,
   db,
   jellyfin: new JellyfinClient(config.jellyfinUrl),
-  // With g-seekr's own IGDB app, the lists and game pages come straight from IGDB; the library and actions from RetroArr
-  retroarr:
-    config.igdbClientId && config.igdbClientSecret
-      ? new DirectIgdbRetroArrClient(config.retroarrUrl, config.retroarrToken, new IgdbApi(config.igdbClientId, config.igdbClientSecret, db))
-      : new RetroArrClient(config.retroarrUrl, config.retroarrToken),
+  retroarr,
   webDir: join(here, '..', 'web'),
 });
 
@@ -37,6 +39,11 @@ app.ready().then(async () => {
   try {
     await requests.platforms();
     app.log.info('RetroArr reachable, token accepted');
+    // Requests are handed over through RetroArr's request API: say now when the two don't speak the same version
+    const info = await retroarr.info();
+    if (info.apiVersion !== REQUEST_API_VERSION) {
+      app.log.error(`RetroArr's request API is version ${info.apiVersion}, g-seekr speaks ${REQUEST_API_VERSION}: requests will fail until both are updated`);
+    }
   } catch (err) {
     app.log.warn(`RetroArr check failed: ${(err as Error).message}`);
   }

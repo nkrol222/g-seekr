@@ -46,11 +46,23 @@ export class Fakes {
   }
   // RetroArr's updates and DLC per game: what is wanted (from PUT /games/{id}/addons) and what the library has
   addOns = new Map<number, { wantLatestUpdate: boolean; wantAllDlc: boolean; dlc: Array<{ igdbId: number | null; title: string }>; updateVersion: string | null; ownedDlc: Set<number>; hasDlcPack: boolean }>();
-  addOnPuts: Array<{ gameId: number; body: Record<string, unknown> }> = [];
+  // What the request API was asked to add of each game's updates and DLC, and whether it searched for them at once
+  addOnWants: Array<{ gameId: number; addOns: Record<string, unknown>; search: boolean }> = [];
   games: FakeGame[] = [];
   nextGameId = 100;
-  failAdd: string | null = null;
+  // POST /requests/fulfil: what it was sent, a refusal to answer with, the games it started a search for
+  fulfilBodies: Array<Record<string, unknown>> = [];
+  failFulfil: string | null = null;
+  searched: number[] = [];
+  statesDown = false;
+  // RetroArr can't reach IGDB: check and fulfil answer 502
+  metadataDown = false;
+  // A RetroArr from before the request API: 404 without a body
+  noRequestApi = false;
+  statesCalls = 0;
+  requestApiVersion = 1;
   calls: string[] = [];
+  // The games the request API added (what a new entry was made of)
   addedBodies: Array<Record<string, unknown>> = [];
   discord: Array<{ content: string; allowed_mentions: unknown }> = [];
   // The download client's queue as RetroArr reports it per game; null = an older RetroArr without the endpoint
@@ -134,7 +146,6 @@ export class Fakes {
       const path = url.pathname.replace('/api/v3', '');
       this.calls.push(`${method} ${path}${url.search}`);
 
-      if (path === '/system/status') return json({ version: '1' });
       if (path === '/platform') return json(this.platforms);
       if (path === '/game/lookup') {
         const term = url.searchParams.get('term')!.toLowerCase();
@@ -143,54 +154,80 @@ export class Fakes {
           .map(([igdbId, g]) => this.lookupGame(igdbId, g));
         return json({ games, status: 'ok' });
       }
-      let m = path.match(/^\/game\/lookup\/igdb\/(\d+)$/);
-      if (m) {
-        const g = this.catalogue.get(Number(m[1]));
-        return g ? json(this.lookupGame(Number(m[1]), g)) : json({}, 404);
+      // The request API, as RetroArr's RequestApiService does it
+      if (path === '/requests/info') return json({ apiVersion: this.requestApiVersion, appVersion: '1.0.0-fake', features: ['check', 'fulfil:game', 'fulfil:addons', 'fulfil:hack', 'states'] });
+      if (path.startsWith('/requests/') && this.noRequestApi) return new Response('', { status: 404 });
+      if (path.startsWith('/requests/') && path !== '/requests/states' && this.metadataDown) return json({ code: 'metadata_unavailable', message: 'IGDB couldn’t be asked about the game right now.' }, 502);
+      if (path === '/requests/check' && method === 'POST') {
+        const g = this.catalogue.get(body.igdbId);
+        if (!g) return json({ code: 'unknown_game', message: `IGDB has no game ${body.igdbId}.` }, 404);
+        const entries = this.entriesOf(body.igdbId, body.platformId);
+        const match = this.pick(entries, body);
+        return json({
+          game: { igdbId: body.igdbId, title: g.title, year: g.year, coverUrl: null, platformIds: g.platforms },
+          entries: entries.map((e) => this.entry(e)),
+          match: match ? this.entry(match) : null,
+          owned: match?.status === 4,
+        });
       }
-      m = path.match(/^\/game\/by-igdb\/(\d+)$/);
-      if (m) {
-        const pid = Number(url.searchParams.get('platformId'));
-        return json(this.games.filter((g) => g.igdbId === Number(m![1]) && g.platformId === pid).map((g) => ({ ...g, status: ['TBA', 'Announced', 'Released', 'Downloading', 'Downloaded'][g.status] })));
+      if (path === '/requests/fulfil' && method === 'POST') {
+        this.fulfilBodies.push(body);
+        if (this.failFulfil) return json({ code: 'duplicate', message: this.failFulfil }, 409);
+        if (body.kind === 'hack') {
+          const h = this.romHacks.find((x) => x.id === body.hackId);
+          if (!h) return json({ code: 'unknown_hack', message: 'no such hack' }, 404);
+          let hack = this.games.find((g) => g.variant === `hack:${h.id}`);
+          if (!hack) {
+            hack = { id: this.nextGameId++, title: String(h.title), igdbId: Number(h.baseIgdbId), platformId: Number(h.platformId), status: 0, monitored: false, variant: `hack:${h.id}` };
+            this.games.push(hack);
+            h.hackGameId = hack.id;
+            h.hackStatus = 'Missing';
+          }
+          const base = this.games.find((g) => g.igdbId === h.baseIgdbId && g.platformId === h.platformId && !g.variant);
+          if (!base) this.searched.push(hack.id);
+          return json({ gameId: hack.id, state: 'wanted', added: false, baseGameId: base?.id ?? null, baseState: base ? this.stateOf(base) : 'wanted' });
+        }
+        const g = this.catalogue.get(body.igdbId);
+        if (!g) return json({ code: 'unknown_game', message: `IGDB has no game ${body.igdbId}.` }, 404);
+        let game = this.pick(this.entriesOf(body.igdbId, body.platformId), body);
+        if (body.kind === 'addons') {
+          if (!game || game.status !== 4) return json({ code: 'not_in_library', message: 'The game isn’t in the library in that version.' }, 409);
+          this.wantAddOns(game.id, body.addOns, true);
+          return json({ gameId: game.id, state: 'available', added: false, baseGameId: null, baseState: null });
+        }
+        let added = false;
+        if (!game) {
+          const fresh = { title: g.title, igdbId: body.igdbId, platformId: body.platformId, monitored: true, region: body.region ?? '', variant: body.variant ?? '', preferLatestRevision: body.latestRevision === true };
+          this.addedBodies.push(fresh);
+          game = { id: this.nextGameId++, ...fresh, status: 0 };
+          this.games.push(game);
+          added = true;
+        }
+        if (game.status !== 4) game.monitored = true;
+        if (body.addOns) this.wantAddOns(game.id, body.addOns, game.status === 4);
+        const state = this.stateOf(game);
+        if (state === 'wanted') this.searched.push(game.id);
+        return json({ gameId: game.id, state, added, baseGameId: null, baseState: null });
       }
-      if (path === '/game' && method === 'POST') {
-        if (this.failAdd) return json({ message: this.failAdd }, 409);
-        this.addedBodies.push(body);
-        const game: FakeGame = { id: this.nextGameId++, title: body.title, igdbId: body.igdbId, platformId: body.platformId, status: 0, monitored: body.monitored, region: body.region ?? '', variant: body.variant ?? '' };
-        this.games.push(game);
-        return json(game, 201);
-      }
-      m = path.match(/^\/game\/(\d+)$/);
-      if (m) {
-        const g = this.games.find((x) => x.id === Number(m![1]));
-        return g ? json(g) : json({}, 404);
+      if (path === '/requests/states' && method === 'POST') {
+        if (this.statesDown) return json({ message: 'boom' }, 500);
+        const ids = body.gameIds as number[];
+        if (ids.length > 500) return json({ code: 'too_many', message: 'gameIds: at most 500' }, 400);
+        this.statesCalls++;
+        return json({
+          games: [...new Set(ids)].map((id) => {
+            const g = this.games.find((x) => x.id === id);
+            return g ? this.entry(g) : { gameId: id, state: 'removed', region: '', variant: '' };
+          }),
+        });
       }
       if (path === '/romhacks') return this.romHacksDown ? json({ message: 'boom' }, 500) : json(this.romHacks);
-      m = path.match(/^\/romhacks\/([a-z0-9-]+)\/request$/);
-      if (m && method === 'POST') {
-        const h = this.romHacks.find((x) => x.id === m![1]);
-        if (!h) return json({ message: 'no such hack' }, 404);
-        let hack = this.games.find((g) => g.variant === `hack:${h.id}`);
-        if (!hack) {
-          hack = { id: this.nextGameId++, title: String(h.title), igdbId: Number(h.baseIgdbId), platformId: Number(h.platformId), status: 0, monitored: false, variant: `hack:${h.id}` };
-          this.games.push(hack);
-          h.hackGameId = hack.id;
-          h.hackStatus = 'Missing';
-        }
-        const base = this.games.find((g) => g.igdbId === h.baseIgdbId && g.platformId === h.platformId && !g.variant);
-        return json({ hackGameId: hack.id, baseGameId: base?.id ?? 0, baseStatus: base ? 'Downloaded' : 'Missing', searching: !base });
-      }
+      let m: RegExpMatchArray | null;
       m = path.match(/^\/games\/(\d+)\/addons$/);
       if (m) {
         const id = Number(m[1]);
         const a = this.addOns.get(id) ?? { wantLatestUpdate: false, wantAllDlc: false, dlc: [], updateVersion: null, ownedDlc: new Set<number>(), hasDlcPack: false };
-        if (method === 'PUT') {
-          this.addOnPuts.push({ gameId: id, body });
-          if (body.wantLatestUpdate !== undefined) a.wantLatestUpdate = body.wantLatestUpdate;
-          if (body.wantAllDlc !== undefined) a.wantAllDlc = body.wantAllDlc;
-          if (body.dlc) a.dlc = body.append ? [...a.dlc, ...body.dlc.filter((d: { igdbId: number }) => !a.dlc.some((x) => x.igdbId === d.igdbId))] : body.dlc;
-          this.addOns.set(id, a);
-        }
+        if (method !== 'GET') return json({ message: 'admin only' }, 403);
         const g = this.games.find((x) => x.id === id);
         return json({
           supported: true,
@@ -202,13 +239,6 @@ export class Fakes {
           dlc: a.dlc.map((d) => ({ ...d, owned: d.igdbId !== null && a.ownedDlc.has(d.igdbId) })),
         });
       }
-      m = path.match(/^\/games\/(\d+)\/monitored$/);
-      if (m) {
-        const g = this.games.find((x) => x.id === Number(m![1]))!;
-        g.monitored = body.monitored;
-        return json({ ok: true });
-      }
-      if (/^\/games\/\d+\/search-now$/.test(path)) return json({ scored: [] });
       if (path === '/games/search-status') {
         const ids = url.searchParams.get('ids')!.split(',').map(Number);
         return json({
@@ -322,6 +352,41 @@ export class Fakes {
       platformIds: g.platforms,
       library: this.games.filter((x) => x.igdbId === igdbId).map((x) => ({ gameId: x.id, platformId: x.platformId, status: x.status, rommId: this.rommIds.get(x.id) ?? null, region: x.region ?? '', variant: x.variant ?? '' })),
     };
+  }
+
+  // RetroArr's entries of a game on a platform, ROM hacks left out
+  private entriesOf(igdbId: number, platformId: number): FakeGame[] {
+    return this.games.filter((g) => g.igdbId === igdbId && g.platformId === platformId && !(g.variant ?? '').startsWith('hack:'));
+  }
+
+  // The entry that is the version asked for, one in the library first (RetroArr's RequestVersion.Matches)
+  private pick(entries: FakeGame[], v: { region?: string; variant?: string }): FakeGame | undefined {
+    const region = (v.region ?? '').toLowerCase();
+    const matches = entries.filter((e) => {
+      if ((e.variant ?? '') !== (v.variant ?? '')) return false;
+      if (!region) return true;
+      return (e.region ?? '').split(',').map((r) => r.trim().toLowerCase()).some((r) => r === region || (region === 'usa' && (r === 'us' || r === 'north america')));
+    });
+    return matches.sort((a, b) => Number(b.status === 4) - Number(a.status === 4) || a.id - b.id)[0];
+  }
+
+  private stateOf(g: FakeGame): string {
+    if (g.status === 4) return 'available';
+    if (g.status === 3) return 'downloading';
+    return g.monitored || (g.variant ?? '').startsWith('hack:') ? 'wanted' : 'unmonitored';
+  }
+
+  private entry(g: FakeGame) {
+    return { gameId: g.id, state: this.stateOf(g), region: g.region ?? '', variant: g.variant ?? '' };
+  }
+
+  private wantAddOns(gameId: number, w: { latestUpdate?: boolean; allDlc?: boolean; dlc?: Array<{ igdbId: number | null; title: string }> }, search: boolean) {
+    this.addOnWants.push({ gameId, addOns: w, search });
+    const a = this.addOns.get(gameId) ?? { wantLatestUpdate: false, wantAllDlc: false, dlc: [], updateVersion: null, ownedDlc: new Set<number>(), hasDlcPack: false };
+    if (w.latestUpdate) a.wantLatestUpdate = true;
+    if (w.allDlc) a.wantAllDlc = true;
+    for (const d of w.dlc ?? []) if (!a.dlc.some((x) => (d.igdbId !== null ? x.igdbId === d.igdbId : x.title === d.title))) a.dlc.push(d);
+    this.addOns.set(gameId, a);
   }
 
   private lookupGame(igdbId: number, g: { title: string; year: number; platforms: number[] }) {
