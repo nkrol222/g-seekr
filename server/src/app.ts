@@ -12,7 +12,7 @@ import type { Config } from './config.js';
 import type { Db } from './db.js';
 import { JellyfinAuthError, type JellyfinClient } from './jellyfin.js';
 import { Notifier } from './notify.js';
-import { RetroArrError, type RetroArrClient } from './retroarr.js';
+import { REQUEST_API_VERSION, RetroArrError, type RetroArrClient } from './retroarr.js';
 import { RequestError, RequestService } from './requests.js';
 import { IssueService, isIssueKind } from './issues.js';
 import { DiscoverService } from './discover.js';
@@ -98,7 +98,7 @@ export async function buildApp(deps: AppDeps) {
         canTurnOff: false,
         firstRunMs: 30_000,
         run: async () => {
-          const open = store.listRequests({ statuses: ['approved', 'searching', 'downloading'] }).length;
+          const open = store.listRequests({ statuses: ['approved', 'searching', 'downloading'], limit: null }).length;
           if (open === 0 && requests.waitingForRomm() === 0) throw new TaskSkipped('No open requests');
           const polled = open > 0 ? await requests.poll() : 'No open requests';
           const linked = await requests.linkRomm();
@@ -193,8 +193,8 @@ export async function buildApp(deps: AppDeps) {
       return reply.code(err.statusCode).send({ error: err.message, code: err.code, request: err.request });
     }
     // RetroArr couldn't ask IGDB (not set up, or not answering): say so plainly
-    if (err instanceof RetroArrError && err.status === 503) {
-      return reply.code(503).send({ error: err.message.replace(/^RetroArr answered 503: /, '') });
+    if (err instanceof RetroArrError && (err.status === 503 || err.status === 502)) {
+      return reply.code(503).send({ error: err.message.replace(/^RetroArr answered 50[23]: /, '') });
     }
     // g-seekr's own IGDB app: not answering, or its credentials refused
     if (err instanceof IgdbError) {
@@ -429,9 +429,17 @@ export async function buildApp(deps: AppDeps) {
           .catch(failed);
       case 'retroarr':
         return deps.retroarr
-          .status()
-          .then((s) => ok(`RetroArr accepted the token${s.version ? ` (version ${s.version})` : ''}.`))
-          .catch(failed);
+          .info()
+          .then((i) =>
+            i.apiVersion === REQUEST_API_VERSION
+              ? ok(`RetroArr accepted the token${i.appVersion ? ` (version ${i.appVersion})` : ''}; its request API matches.`)
+              : { ok: false, message: `RetroArr's request API is version ${i.apiVersion}; this g-seekr speaks ${REQUEST_API_VERSION}. Update ${i.apiVersion < REQUEST_API_VERSION ? 'RetroArr' : 'g-seekr'}.` },
+          )
+          .catch((err: unknown) =>
+            err instanceof RetroArrError && err.status === 404
+              ? { ok: false, message: 'RetroArr accepted the token but has no request API: update RetroArr.' }
+              : failed(err),
+          );
       case 'romm': {
         const client = romm();
         if (!client) return { ok: false, message: 'No RomM API address is set.' };

@@ -451,19 +451,24 @@ export class Store {
     ).map(toRequest);
   }
 
-  listRequests(filter: { userId?: number; statuses?: RequestStatus[] } = {}): GameRequest[] {
+  // limit: the newest that many (500 by default, for pages); null for every one (the poller and webhooks must see all)
+  listRequests(filter: { userId?: number; statuses?: RequestStatus[]; retroarrGameId?: number; limit?: number | null } = {}): GameRequest[] {
     const where: string[] = [];
     const args: Array<string | number> = [];
     if (filter.userId !== undefined) {
       where.push('r.user_id = ?');
       args.push(filter.userId);
     }
+    if (filter.retroarrGameId !== undefined) {
+      where.push('r.retroarr_game_id = ?');
+      args.push(filter.retroarrGameId);
+    }
     if (filter.statuses?.length) {
       where.push(`r.status IN (${filter.statuses.map(() => '?').join(',')})`);
       args.push(...filter.statuses);
     }
     const sql = `${REQUEST_SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.created_at DESC LIMIT 500`;
+      ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.created_at DESC${filter.limit === null ? '' : ` LIMIT ${Math.max(1, Math.floor(filter.limit ?? 500))}`}`;
     return (this.db.prepare(sql).all(...args) as Row[]).map(toRequest);
   }
 

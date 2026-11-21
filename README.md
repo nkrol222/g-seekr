@@ -44,15 +44,18 @@ wasn't grabbed, who approved it, and the error. Users see plain steps only. The 
 from RetroArr's `/api/v3/games/search-status` (fork). An older RetroArr just leaves out the search
 detail.
 
-The hand-off works like this:
-1. g-seekr reuses RetroArr's existing entry for that IGDB game and platform. If there isn't one, it adds the game with RetroArr's IGDB metadata.
-2. It sets the game to monitored.
-3. It starts a search with automatic grabbing.
+The hand-off goes through RetroArr's **request API** (`/api/v3/requests`, see
+[docs/retroarr-api.md](docs/retroarr-api.md)): g-seekr says what was asked for (the game, the
+platform, the version, its updates and DLC, or a ROM hack) and RetroArr decides how. It uses the
+entry it has for that version or adds one with IGDB's metadata, monitors it and starts a search
+with automatic grabbing. g-seekr never sends RetroArr a game model, and keeps no copy of RetroArr's
+rules (which entry is which version, what counts as in the library).
 
 RetroArr's webhooks move a request as things happen: a grab makes it `downloading`, an import
 `available`, and a failed download leaves it `searching` with the reason. A removed game fails it.
 They need `RETROARR_WEBHOOK_TOKEN`; see "RetroArr webhook" below. Every `POLL_SECONDS` (default
-5 minutes), g-seekr also checks the games it handed off, which catches anything a webhook missed.
+5 minutes), g-seekr also checks the games it handed off (every open request's entry in one call),
+which catches anything a webhook missed.
 
 ### Tasks
 
@@ -81,7 +84,7 @@ everything at once:
 - **Sessions** use a random 256-bit ID in an `httpOnly`, `SameSite=Lax` and (by default) `Secure` cookie. Only its SHA-256 is stored.
 - **CSRF:** every change needs the `x-gseekr: 1` header, which another site can't send without a CORS preflight that g-seekr never grants. When `PUBLIC_URL` is set, changes from any other `Origin` are refused too.
 - **Sign-in throttling:** after 5 failed sign-ins per username, or 10 per client address, within 15 minutes, further attempts are refused until the window passes.
-- **RetroArr access** uses a scoped token (`requests`), never the instance API key. The config refuses anything that isn't a `rat_…` token. With that token RetroArr refuses deletes, settings and token management.
+- **RetroArr access** uses a scoped token (`requests`), never the instance API key. The config refuses anything that isn't a `rat_…` token. With that token RetroArr refuses deletes, settings and token management, and it can add or change library entries only through the request API (never send a game model with a path).
 - **Discord messages** are sent with mentions disabled, so a game title can't ping anyone.
 - **Headers:** responses carry a strict Content-Security-Policy, `X-Frame-Options: DENY` and `nosniff`.
 - **Admin pages:** every admin API route answers 403 to anyone else, checked on the server; the web app also sends a non-admin who opens an admin page's address to their own Settings. A test sends a non-admin, and a signed-out visitor, to every route registered as admins-only.

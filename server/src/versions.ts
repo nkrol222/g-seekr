@@ -1,7 +1,7 @@
 import type { AddOns } from './store.js';
 
 // Which version of a game a request is for: a region, the English fan translation, the latest revision. The default
-// (any region, the release itself) is what every request was before. Matches RetroArr's entry keys: Region and Variant.
+// (any region, the release itself) is what every request was before. Matches RetroArr's entry keys: Region and Variant; RetroArr's request API decides which entry is which version.
 
 export const REGIONS = ['USA', 'Europe', 'Japan', 'World', 'Australia', 'Korea', 'China', 'Brazil', 'Asia'] as const;
 export const EN_TRANSLATION = 'en-translation';
@@ -27,17 +27,6 @@ export function parseVersion(body: { region?: unknown; variant?: unknown; latest
 // "Europe · English translation · latest revision"; '' for the default
 export function versionLabel(v: { region: string; variant: string; latestRevision?: boolean }): string {
   return [v.region, v.variant === EN_TRANSLATION ? 'English translation' : '', v.latestRevision ? 'latest revision' : ''].filter(Boolean).join(' · ');
-}
-
-// Whether a library entry (RetroArr's region and variant) is the version asked for. Any region: any entry of the
-// variant. A region: an entry of it ("USA, Europe" has both).
-export function entryMatches(v: Pick<Version, 'region' | 'variant'>, entry: { region?: string | null; variant?: string | null }): boolean {
-  if ((entry.variant ?? '') !== v.variant) return false;
-  if (!v.region) return true;
-  return (entry.region ?? '')
-    .split(',')
-    .map((r) => r.trim().toLowerCase())
-    .some((r) => r === v.region.toLowerCase() || (v.region === 'USA' && (r === 'us' || r === 'north america')));
 }
 
 // Updates and DLC from a request body: { latestUpdate, allDlc, dlc: [{ igdbId, title }] }; a string says what's wrong

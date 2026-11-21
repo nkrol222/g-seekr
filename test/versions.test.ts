@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../server/src/db.js';
-import { entryMatches, parseAddOns, parseVersion, versionLabel } from '../server/src/versions.js';
+import { parseAddOns, parseVersion, versionLabel } from '../server/src/versions.js';
 
 describe('versions', () => {
   it('reads a version from a request body', () => {
@@ -13,15 +13,6 @@ describe('versions', () => {
   it('labels a version', () => {
     expect(versionLabel({ region: '', variant: '' })).toBe('');
     expect(versionLabel({ region: 'Japan', variant: 'en-translation', latestRevision: true })).toBe('Japan · English translation · latest revision');
-  });
-
-  it('matches library entries by variant, then region', () => {
-    const any = { region: '', variant: '' as const };
-    expect(entryMatches(any, { region: 'Japan', variant: '' })).toBe(true);
-    expect(entryMatches(any, { region: 'Japan', variant: 'en-translation' })).toBe(false);
-    expect(entryMatches({ region: 'Europe', variant: '' }, { region: 'USA, Europe' })).toBe(true);
-    expect(entryMatches({ region: 'USA', variant: '' }, { region: 'US' })).toBe(true);
-    expect(entryMatches({ region: 'Japan', variant: '' }, { region: null })).toBe(false);
   });
 
   it('allows one open request per version', () => {
