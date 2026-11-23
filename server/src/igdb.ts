@@ -183,6 +183,25 @@ export function similarity(title: string, name: string): number {
   return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
 }
 
+// The searches for a title, in order, each tried only when the ones before found nothing close
+export function matchQueries(title: string): string[] {
+  const out: string[] = [];
+  const add = (q: string) => {
+    const t = q.replace(/\s+/g, ' ').trim();
+    if (t.length >= 2 && !out.some((o) => o.toLowerCase() === t.toLowerCase())) out.push(t);
+  };
+  add(title);
+  add(title.replace(/(?<=[A-Za-z])(ae|oe|ue)(?=[a-z])/gi, (m) => m[0]!));
+  add(title.replace(/\b(\p{L})[-/.](?=\p{L}\b)/gu, '$1'));
+  add(title.replace(/[^\p{L}\p{N}]+/gu, ' '));
+  const parts = title.split(/ - | – |: /).map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    add(parts[parts.length - 1]!);
+    add(parts[0]!);
+  }
+  return out.slice(0, 6);
+}
+
 export interface DiscoverQueryBody {
   list?: string;
   query?: string | null;
@@ -455,6 +474,9 @@ export class DirectIgdbRetroArrClient extends RetroArrClient {
     return map;
   }
 
+  // A list's titles on IGDB. Each candidate is compared with its name and its alternative names, and a title that
+  // finds nothing close is searched again: umlauts as IGDB spells them, punctuation dropped, each side of a " - "
+  // (the same rules as RetroArr's matcher)
   override async match(platformId: number, titles: string[]): Promise<{ title: string; candidates: { game: RetroArrDiscoverGame; similarity: number }[] }[]> {
     const igdbPlatforms = await this.igdbPlatformIds([platformId]);
     const { byIgdb } = await this.platformsByIgdb();
@@ -465,17 +487,23 @@ export class DirectIgdbRetroArrClient extends RetroArrClient {
         results.push({ title: raw, candidates: [] });
         continue;
       }
-      const body = `fields ${CARD_FIELDS}; search "${escape(title)}"; where platforms = (${igdbPlatforms.join(',')}) & version_parent = null & parent_game = null; limit 8;`;
-      const cards = await this.q<IgdbCard>(`match:${body}`, 'games', body);
-      const candidates = cards
-        .map((c) => ({ game: this.card(c, byIgdb), similarity: Math.round(similarity(title, c.name) * 1000) / 1000 }))
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, 5);
-      results.push({ title: raw, candidates });
+      const found = new Map<number, { game: RetroArrDiscoverGame; similarity: number }>();
+      for (const query of matchQueries(title)) {
+        const body = `fields ${CARD_FIELDS}, alternative_names.name; search "${escape(query)}"; where platforms = (${igdbPlatforms.join(',')}) & version_parent = null & parent_game = null; limit 8;`;
+        const cards = await this.q<IgdbCard & { alternative_names?: { name: string }[] }>(`match:${body}`, 'games', body);
+        for (const c of cards) {
+          const sim = Math.round(Math.max(similarity(title, c.name), ...(c.alternative_names ?? []).map((a) => similarity(title, a.name))) * 1000) / 1000;
+          const had = found.get(c.id);
+          if (!had || had.similarity < sim) found.set(c.id, { game: this.card(c, byIgdb), similarity: sim });
+        }
+        if ([...found.values()].some((c) => c.similarity >= 0.9)) break;
+      }
+      results.push({ title: raw, candidates: [...found.values()].sort((a, b) => b.similarity - a.similarity).slice(0, 5) });
     }
     await this.withLibrary(results.flatMap((r) => r.candidates.map((c) => c.game)));
     return results;
   }
+
 
   // The search box: IGDB's search on every requestable platform, owned when the library has it downloaded
   override async lookup(term: string): Promise<RetroArrLookupGame[]> {
