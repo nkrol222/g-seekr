@@ -154,7 +154,7 @@ export function Requests({ me, filter, onChanged }: { me: Me; filter: Filter; on
                   <dd>
                     <StatusBadge status={r.status} />
                   </dd>
-                  {r.now && r.now.key !== 'requested' && !(r.now.key === 'romm' && r.now.state === 'done') && (
+                  {r.now && r.now.key !== 'requested' && !(r.now.key === 'approved' && r.status !== 'approved') && !(r.now.key === 'romm' && r.now.state === 'done') && (
                     <>
                       <dt>Now</dt>
                       <dd>

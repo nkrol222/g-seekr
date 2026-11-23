@@ -578,6 +578,8 @@ button.avatar {
   gap: 0.4rem;
 }
 .slider-head a {
+  padding: 0.6rem 0 0.6rem 0.75rem;
+  margin: -0.6rem 0;
   color: var(--gray-400);
   font-family: var(--font-mono);
   font-size: 0.8rem;
@@ -2792,4 +2794,31 @@ table.table {
   .settings-facts dd {
     margin-bottom: 0.6rem;
   }
+}
+
+/* A text-only button still gets a finger-sized target on phones */
+@media (pointer: coarse) {
+  .link-button {
+    min-height: 2.5rem;
+  }
+}
+.not-found {
+  max-width: 36rem;
+  margin: 3rem auto;
+}
+.not-found h1 {
+  margin-bottom: 1rem;
+}
+.not-found .actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+/* A long status ("Waiting for approval") wraps instead of running out of a phone-width card */
+.request-card .facts dd {
+  min-width: 0;
+}
+.request-card .facts dd .badge {
+  white-space: normal;
+  max-width: 100%;
 }

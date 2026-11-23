@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { addOnsLabel, api, NO_ADDONS, type RomHack, REGIONS, STATUS_LABEL, versionLabel, type AddOns, type Dlc, type GamePage as Page, type Platform, type RequestStatus, type Version } from '../api';
+import { addOnsLabel, api, ApiError, NO_ADDONS, type RomHack, REGIONS, STATUS_LABEL, versionLabel, type AddOns, type Dlc, type GamePage as Page, type Platform, type RequestStatus, type Version } from '../api';
 import { Alert, Icon, Poster, rommGameUrl, StatusBadge } from './shared';
 import { cardStatus, TitleCard } from './Titles';
 import { HackList } from './RomHacks';
@@ -19,7 +19,9 @@ export function GamePage({
 }) {
   const [page, setPage] = useState<Page | null>(null);
   const [platforms, setPlatforms] = useState<Map<number, Platform>>(new Map());
+  const [platformsFailed, setPlatformsFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [missing, setMissing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<number | null>(null);
   // The platform whose "Another version" picker is open, and what's picked in it
@@ -51,11 +53,15 @@ export function GamePage({
         setPage(p);
         setMine(p.mine ?? { liked: false, dismissed: false });
       })
-      .catch((err: Error) => !cancelled && setError(err.message));
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setMissing(err instanceof ApiError && err.status === 404);
+        setError(err.message);
+      });
     api
       .platforms()
       .then((list) => !cancelled && setPlatforms(new Map(list.map((p) => [p.id, p]))))
-      .catch(() => undefined);
+      .catch(() => !cancelled && setPlatformsFailed(true));
     return () => {
       cancelled = true;
     };
@@ -112,7 +118,23 @@ export function GamePage({
     await api.dismiss(igdbId, dismissed, page?.game.title ?? '').catch(() => setMine(mine));
   };
 
-  if (error && !page) return <Alert kind="error">{error}</Alert>;
+  if (error && !page)
+    return (
+      <div className="not-found">
+        <h1>{missing ? 'Game not found' : 'This game couldn’t be loaded'}</h1>
+        <Alert kind="error">{error}</Alert>
+        <p className="actions">
+          {!missing && (
+            <button type="button" className="btn primary" onClick={() => window.location.reload()}>
+              <Icon name="refresh" /> Try again
+            </button>
+          )}
+          <a className="btn" href="#/">
+            Back to Discover
+          </a>
+        </p>
+      </div>
+    );
   if (!page) return <div className="game-skeleton" aria-busy="true" />;
 
   const g = page.game;
@@ -191,8 +213,6 @@ export function GamePage({
 
       <div className="game-body">
         <div className="game-main">
-          {error && <Alert kind="error">{error}</Alert>}
-          {notice && <Alert kind="success">{notice}</Alert>}
 
           <section>
             <h2>Overview</h2>
@@ -209,8 +229,14 @@ export function GamePage({
 
           <section>
             <h2>Request</h2>
-            {g.platformIds.length === 0 ? (
+            <div aria-live="polite">
+              {error && <Alert kind="error">{error}</Alert>}
+              {notice && <Alert kind="success">{notice}</Alert>}
+            </div>
+            {g.platformIds.length === 0 || (platforms.size > 0 && !g.platformIds.some((pid) => platforms.has(pid))) ? (
               <p className="muted">It isn’t out on any platform you can request.</p>
+            ) : platforms.size === 0 ? (
+              <p className="muted">{platformsFailed ? 'The platforms couldn’t be loaded, so it can’t be requested right now. Reload the page to try again.' : 'Loading platforms…'}</p>
             ) : (
               <div className="platform-list">
                 {[...g.platformIds]
@@ -238,7 +264,7 @@ export function GamePage({
                           </span>
                         ) : s ? (
                           <StatusBadge status={s} />
-                        ) : (
+                        ) : picking === pid ? null : (
                           <button
                             type="button"
                             className="btn primary sm"
@@ -301,7 +327,7 @@ export function GamePage({
                         >
                           <label>
                             Region
-                            <select value={picked.region} onChange={(e) => setPicked({ ...picked, region: e.target.value })}>
+                            <select className="select" value={picked.region} onChange={(e) => setPicked({ ...picked, region: e.target.value })}>
                               <option value="">Any (the preferred region first)</option>
                               {regions.map((r) => (
                                 <option key={r} value={r}>
@@ -392,8 +418,8 @@ export function GamePage({
             <section>
               <h2>Screenshots</h2>
               <div className="shots">
-                {page.screenshots.map((s) => (
-                  <a key={s} href={s.replace('/t_screenshot_big/', '/t_1080p/')} target="_blank" rel="noreferrer">
+                {page.screenshots.map((s, i) => (
+                  <a key={s} href={s.replace('/t_screenshot_big/', '/t_1080p/')} target="_blank" rel="noreferrer" aria-label={`Screenshot ${i + 1}, full size`}>
                     <img src={s} alt="" loading="lazy" referrerPolicy="no-referrer" />
                   </a>
                 ))}

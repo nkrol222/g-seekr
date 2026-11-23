@@ -1,7 +1,8 @@
 // A fake Jellyfin and RetroArr on one port, for running g-seekr locally without either:
 //   npm run dev:fake        (Jellyfin at /jf, RetroArr at /ra, users alice/bob/root, password "pw")
 // then start g-seekr with JELLYFIN_URL=http://127.0.0.1:5099/jf RETROARR_URL=http://127.0.0.1:5099/ra
-// RETROARR_TOKEN=rat_xxx… (43 x). POST /ra/_import/{gameId} marks a game downloaded.
+// RETROARR_TOKEN=rat_xxx… (43 x). POST /ra/_import/{gameId} marks a game downloaded; POST /_down/igdb/1 (and
+// jellyfin, romHacks, states, metadata, romm) makes that upstream fail, /0 brings it back.
 import { createServer } from 'node:http';
 import { Fakes, JELLYFIN, RETROARR } from './fakes.js';
 
@@ -51,6 +52,13 @@ createServer(async (req, res) => {
       lastSearch: { at: new Date(Date.now() - 2 * 3600_000).toISOString(), outcome: h[2], found: 5, rejected: 4, automatic: true, release: 'Chrono Trigger (Japan) [T-En by Aeon Genesis]', score: 41, reason: 'below auto-download threshold (translation patch)' },
       nextSearchAt: new Date(Date.now() + 4 * 3600_000).toISOString(),
     });
+    res.writeHead(204).end();
+    return;
+  }
+  // POST /_down/{jellyfin|romHacks|states|metadata|romm|igdb}/{0|1}: that upstream fails until switched back
+  const d = url.match(/^\/_down\/(jellyfin|romHacks|states|metadata|romm|igdb)\/([01])$/);
+  if (d) {
+    (fakes as unknown as Record<string, boolean>)[`${d[1]}Down`] = d[2] === '1';
     res.writeHead(204).end();
     return;
   }
