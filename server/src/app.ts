@@ -182,7 +182,10 @@ export async function buildApp(deps: AppDeps) {
   };
   // Every admins-only route, as "METHOD /path": the tests send a non-admin to each one
   const adminRoutes: string[] = [];
+  // Every route, for the tests that send each one hostile input
+  const routes: string[] = [];
   app.addHook('onRoute', (route) => {
+    for (const m of [route.method].flat()) if (m !== 'HEAD') routes.push(`${m} ${route.url}`);
     const pre = route.preHandler;
     if (pre === requireAdmin || (Array.isArray(pre) && pre.includes(requireAdmin)))
       for (const m of [route.method].flat()) if (m !== 'HEAD') adminRoutes.push(`${m} ${route.url}`);
@@ -793,16 +796,24 @@ export async function buildApp(deps: AppDeps) {
 
   const webDir = deps.webDir === undefined ? null : deps.webDir;
   if (webDir && existsSync(join(webDir, 'index.html'))) {
-    await app.register(fastifyStatic, { root: webDir, wildcard: false });
+    await app.register(fastifyStatic, {
+      root: webDir,
+      wildcard: false,
+      cacheControl: false,
+      // Vite names everything under assets/ by its content hash: cached for good. index.html names the current ones.
+      setHeaders: (res, path) => {
+        res.header('Cache-Control', /[\\/]assets[\\/]/.test(path) ? 'public, max-age=31536000, immutable' : 'no-cache');
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/') || req.method !== 'GET') return reply.code(404).send({ error: 'Not found.' });
+      if (req.url.startsWith('/api/') || (req.method !== 'GET' && req.method !== 'HEAD')) return reply.code(404).send({ error: 'Not found.' });
       return reply.header('Cache-Control', 'no-cache').sendFile('index.html');
     });
   } else {
     app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'Not found.' }));
   }
 
-  return { app, store, requests, issues, recommend, collections, tasks, settings, adminRoutes };
+  return { app, store, requests, issues, recommend, collections, tasks, settings, adminRoutes, routes };
 }
 
 declare module 'fastify' {
