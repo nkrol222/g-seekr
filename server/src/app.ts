@@ -47,6 +47,15 @@ const PUBLIC_ROUTES = new Set(['/api/health', '/api/auth/login']);
 // Called by RetroArr, not a browser: no session or CSRF header, the shared token authenticates it
 const WEBHOOK_ROUTE = '/api/webhooks/retroarr';
 
+// Whether a browser's Origin is the host the request was sent to (behind Tailscale Serve, its Host header)
+function sameHost(origin: string, host: string | undefined): boolean {
+  try {
+    return !!host && new URL(origin).host.toLowerCase() === host.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 // Compared as hashes, so neither the length nor the content leaks through timing
 function tokensMatch(given: string, expected: string): boolean {
   const a = createHash('sha256').update(given).digest();
@@ -166,8 +175,10 @@ export async function buildApp(deps: AppDeps) {
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       if (req.headers[CSRF_HEADER] !== '1') return reply.code(403).send({ error: 'Missing request header.' });
+      // A change comes from g-seekr's own page: the public address, or the address this request came to (the
+      // tailnet's :464 beside the public Funnel URL). Anything else is another site.
       const origin = req.headers.origin;
-      if (config.publicUrl && origin && origin !== new URL(config.publicUrl).origin) {
+      if (config.publicUrl && origin && origin !== new URL(config.publicUrl).origin && !sameHost(origin, req.host)) {
         return reply.code(403).send({ error: 'Cross-origin request refused.' });
       }
     }

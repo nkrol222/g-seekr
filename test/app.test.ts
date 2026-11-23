@@ -121,6 +121,22 @@ describe('sign-in', () => {
       payload: { username: 'alice', password: 'pw' },
     });
     expect(sameOrigin.statusCode).toBe(200);
+    // The tailnet address beside the public one: the page's own host is no other site
+    const tailnet = await built.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { ...H, host: 'argus.tail.ts.net:464', origin: 'https://argus.tail.ts.net:464' },
+      payload: { username: 'alice', password: 'pw' },
+    });
+    expect(tailnet.statusCode).toBe(200);
+    // but a page on another site, even one naming this host in a path, still isn't
+    const lookalike = await built.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { ...H, host: 'argus.tail.ts.net:464', origin: 'https://argus.tail.ts.net.evil.test' },
+      payload: { username: 'alice', password: 'pw' },
+    });
+    expect(lookalike.statusCode).toBe(403);
   });
 });
 
