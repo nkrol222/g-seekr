@@ -124,6 +124,7 @@ export function FilterPanel({ filters, platforms, onApply, onClose }: { filters:
             </label>
           </section>
 
+          <p className="muted small">Each genre, game mode or theme you pick narrows the list to games that have all of them.</p>
           <section>
             <h3>Genres</h3>
             {options ? <Chips label="Genres" options={options.genres} selected={draft.genreIds} onChange={(v) => set('genreIds', v)} /> : <p className="muted small">Loading…</p>}

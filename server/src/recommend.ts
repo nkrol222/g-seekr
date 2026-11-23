@@ -255,7 +255,8 @@ function matches(card: DiscoverCard, f: Filters, genres: Set<string> | null): bo
   if (f.yearTo !== null && (card.year === null || card.year > f.yearTo)) return false;
   if (f.minRating !== null && (card.rating ?? 0) < f.minRating) return false;
   if (f.minRatingCount !== null && (card.ratingCount ?? 0) < f.minRatingCount) return false;
-  if (genres && !card.genres.some((g) => genres.has(g))) return false;
+  // Every genre picked, as Browse does
+  if (genres && ![...genres].every((g) => card.genres.includes(g))) return false;
   return true;
 }
 

@@ -179,10 +179,14 @@ describe('IGDB query text', () => {
   it('is what RetroArr sent', () => {
     const now = new Date(Date.UTC(2026, 10, 19));
     expect(buildWhere({ genreIds: [12, 12], yearFrom: 1990, yearTo: 1999, minRating: 80 }, [7, 19], now)).toBe(
-      'platforms = (7,19) & version_parent = null & parent_game = null & genres = (12) & (themes = null | themes != (42)) & ' +
+      'platforms = (7,19) & version_parent = null & parent_game = null & genres = [12] & (themes = null | themes != (42)) & ' +
         'first_release_date >= 631152000 & first_release_date < 946684800 & total_rating >= 80 & cover != null & first_release_date <= 1795046400',
     );
-    expect(buildWhere({ query: 'zelda', includeAdult: true, themeIds: [42] }, [19], now)).toBe('platforms = (19) & version_parent = null & parent_game = null & themes = (42)');
+    expect(buildWhere({ query: 'zelda', includeAdult: true, themeIds: [42] }, [19], now)).toBe('platforms = (19) & version_parent = null & parent_game = null & themes = [42]');
+    // Every pick narrows: a game with all three genres, both modes
+    expect(buildWhere({ query: 'x', genreIds: [12, 31, 5], gameModeIds: [1, 2] }, [19], now)).toBe(
+      'platforms = (19) & version_parent = null & parent_game = null & genres = [12,31,5] & game_modes = [1,2] & (themes = null | themes != (42))',
+    );
   });
 
   it('finds how alike a list title and an IGDB name are', () => {
