@@ -113,10 +113,12 @@ export function RomHacks({ platformParam, kindParam }: { platformParam: number |
 
   return (
     <section className="page">
-      <h1>ROM hacks</h1>
+      <div className="page-title">
+        <h1>ROM hacks</h1>
+      </div>
       <p className="muted">Fan-made versions of games: improvements, harder modes, new stories. Each is patched from the game itself, so the game comes too if the library doesn’t have it.</p>
       <div className="filters-row">
-        <select value={platformParam ?? ''} onChange={(e) => go(Number(e.target.value) || null, kindParam)} aria-label="Platform">
+        <select className="select" value={platformParam ?? ''} onChange={(e) => go(Number(e.target.value) || null, kindParam)} aria-label="Platform">
           <option value="">All platforms</option>
           {platforms.map((p) => (
             <option key={p.id} value={p.id}>
@@ -124,7 +126,7 @@ export function RomHacks({ platformParam, kindParam }: { platformParam: number |
             </option>
           ))}
         </select>
-        <select value={kindParam ?? ''} onChange={(e) => go(platformParam, e.target.value || null)} aria-label="Kind">
+        <select className="select" value={kindParam ?? ''} onChange={(e) => go(platformParam, e.target.value || null)} aria-label="Kind">
           <option value="">Every kind</option>
           {kinds.map((k) => (
             <option key={k} value={k}>

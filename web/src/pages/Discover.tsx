@@ -34,6 +34,7 @@ export function Discover({ me }: { me: Me }) {
 
   return (
     <>
+      <h1 className="sr-only">Discover</h1>
       {/* One status line instead of a banner: the user's own requests at a glance, and the quota */}
       <nav className="status-line" aria-label="Your requests">
         <a href="#/requests?filter=available">

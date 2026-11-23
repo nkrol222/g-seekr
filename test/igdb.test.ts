@@ -196,3 +196,13 @@ describe('IGDB query text', () => {
     expect(similarity('Mario', 'Mario Kart')).toBeLessThan(0.9);
   });
 });
+
+describe('matching a list’s titles', () => {
+  it('searches again with the spelling IGDB uses, and each side of a dash', async () => {
+    const { matchQueries } = await import('../server/src/igdb.js');
+    expect(matchQueries('Einhaender')).toContain('Einhander');
+    expect(matchQueries('R-C Stunt Copter')).toContain('RC Stunt Copter');
+    expect(matchQueries('Final Fantasy Anthology - Final Fantasy V')).toEqual(expect.arrayContaining(['Final Fantasy V', 'Final Fantasy Anthology']));
+    expect(matchQueries('Chrono Cross')).toEqual(['Chrono Cross']);
+  });
+});
