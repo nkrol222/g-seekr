@@ -27,6 +27,8 @@ fakes.matches.set('Super Metroid', [[1103, 1]]);
 fakes.matches.set('Secret of Mana', [[1079, 0.97]]);
 fakes.matches.set('Zelda', [[1026, 0.62]]);
 fakes.matches.set('Mario', [[1068, 0.55], [1074, 0.52]]);
+// FAKE_EXTRA_GAMES=200: that many more games, to page through Browse
+for (let i = 0; i < Number(process.env.FAKE_EXTRA_GAMES ?? 0); i++) fakes.catalogue.set(20000 + i, { title: `Extra Game ${i + 1}`, year: 1990 + (i % 30), platforms: [i % 2 ? 41 : 50] });
 const port = Number(process.env.FAKE_PORT ?? 5099);
 
 createServer(async (req, res) => {

@@ -1281,6 +1281,7 @@ table.table {
   display: flex;
   justify-content: center;
   margin-top: 1.5rem;
+  min-height: 2.5rem;
 }
 .pill {
   min-width: 1.3rem;

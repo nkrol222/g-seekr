@@ -203,10 +203,12 @@ export interface DiscoverQueryBody {
 export function buildWhere(q: DiscoverQueryBody, igdbPlatforms: number[], now: Date): string {
   const ids = (list: number[] | undefined) => [...new Set((list ?? []).filter((i) => i > 0))].join(',');
   const parts = [`platforms = (${igdbPlatforms.join(',')})`, 'version_parent = null', 'parent_game = null'];
-  if (ids(q.genreIds)) parts.push(`genres = (${ids(q.genreIds)})`);
-  if (ids(q.gameModeIds)) parts.push(`game_modes = (${ids(q.gameModeIds)})`);
+  // Each genre, theme and mode picked narrows the list: a game has all of them. IGDB's "= (a,b)" is any of them,
+  // so every pick widened it, and by three picks nearly everything matched; "= [a,b]" is all of them.
+  if (ids(q.genreIds)) parts.push(`genres = [${ids(q.genreIds)}]`);
+  if (ids(q.gameModeIds)) parts.push(`game_modes = [${ids(q.gameModeIds)}]`);
   const themes = (q.themeIds ?? []).filter((i) => i > 0 && (q.includeAdult || i !== ADULT_THEME));
-  if (themes.length) parts.push(`themes = (${ids(themes)})`);
+  if (themes.length) parts.push(`themes = [${ids(themes)}]`);
   if (!q.includeAdult) parts.push(`(themes = null | themes != (${ADULT_THEME}))`);
   const year = (y: number) => Math.min(2100, Math.max(1950, y));
   if (q.yearFrom != null) parts.push(`first_release_date >= ${unix(new Date(Date.UTC(year(q.yearFrom), 0, 1)))}`);

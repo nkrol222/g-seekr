@@ -81,6 +81,10 @@ export function cleanFilters(raw: unknown): Filters {
   };
 }
 
+// "More like this": topped up to at least this many, never more than the other
+const LIKE_MIN = 6;
+const LIKE_MAX = 12;
+
 export class DiscoverService {
   constructor(
     private readonly store: Store,
@@ -156,7 +160,8 @@ export class DiscoverService {
     return this.cards(await this.retroarr.recentlyAdded(20));
   }
 
-  async game(igdbId: number, includeAdult: boolean) {
+  // topUp: fill "more like this" from the game's genres (the game page); For you keeps IGDB's own similar games
+  async game(igdbId: number, includeAdult: boolean, topUp = false) {
     const detail = await this.retroarr.discoverGame(igdbId, includeAdult);
     if (!detail) throw new RequestError('That game wasn’t found on IGDB.', 404, 'unknown_game');
     const all = await this.cards([detail.game, ...detail.similar, ...detail.series, ...detail.fromDeveloper]);
@@ -167,11 +172,13 @@ export class DiscoverService {
     const requestable = new Map((await this.requests.platforms()).map((p) => [p.id, p.name]));
     // Games that can't be requested anywhere here aren't worth a poster
     const askable = (list: DiscoverCard[]) => list.filter((g) => g.platformIds.length > 0);
+    const seriesCards = askable(series);
+    const like = topUp ? await this.moreLikeThis(game, askable(similar), [igdbId, ...seriesCards.map((c) => c.igdbId)], includeAdult) : askable(similar);
     return {
       ...detail,
       game,
-      similar: askable(similar),
-      series: askable(series),
+      similar: like,
+      series: seriesCards,
       fromDeveloper: askable(fromDeveloper),
       releases: detail.releases.map((r) => ({ ...r, requestable: r.platformId !== null && requestable.has(r.platformId) })),
     };
@@ -179,6 +186,34 @@ export class DiscoverService {
 
   options() {
     return this.retroarr.discoverOptions();
+  }
+
+  // IGDB's similar games, which are few or none for a less-known game (Zenonia had none that could be requested),
+  // topped up with the most popular games of its genres on the platforms it can be requested for. Never the game itself
+  // or its series, which has a row of its own.
+  private async moreLikeThis(game: DiscoverCard, similar: DiscoverCard[], exclude: number[], includeAdult: boolean): Promise<DiscoverCard[]> {
+    if (similar.length >= LIKE_MIN || game.genres.length === 0) return similar;
+    try {
+      const { genres } = await this.options();
+      // In the game's own order: IGDB lists its main genre first
+      const genreIds = game.genres.map((name) => genres.find((g) => g.name === name)?.id).filter((id): id is number => typeof id === 'number');
+      if (genreIds.length === 0) return similar;
+      const platformIds = game.platformIds.length > 0 ? game.platformIds : (await this.requests.platforms()).map((p) => p.id);
+      const skip = new Set([...exclude, ...similar.map((c) => c.igdbId)]);
+      const pick = async (ids: number[]) =>
+        (await this.cards(await this.retroarr.discoverGames({ list: 'browse', sort: 'popular', platformIds, genreIds: ids, includeAdult, offset: 0, limit: LIKE_MAX * 2 })))
+          .filter((c) => !skip.has(c.igdbId) && c.platformIds.length > 0);
+      // All its genres first (closest); its main genre alone when that finds too few
+      let extra = await pick(genreIds);
+      if (similar.length + extra.length < LIKE_MIN && genreIds.length > 1) {
+        const seen = new Set(extra.map((c) => c.igdbId));
+        extra = [...extra, ...(await pick(genreIds.slice(0, 1))).filter((c) => !seen.has(c.igdbId))];
+      }
+      return [...similar, ...extra].slice(0, LIKE_MAX);
+    } catch {
+      // IGDB not answering: what IGDB called similar is still worth showing
+      return similar;
+    }
   }
 
   private async cards(games: RetroArrDiscoverGame[]): Promise<DiscoverCard[]> {

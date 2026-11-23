@@ -331,7 +331,7 @@ export async function buildApp(deps: AppDeps) {
   app.get<{ Params: { igdbId: string } }>('/api/games/:igdbId', async (req, reply) => {
     const igdbId = gameId(req.params.igdbId);
     if (igdbId === null) return reply.code(404).send({ error: 'Game not found.' });
-    const page = await discover.game(igdbId, discover.filtersFor(req.user!).includeAdult);
+    const page = await discover.game(igdbId, discover.filtersFor(req.user!).includeAdult, true);
     const liked = store.likes(req.user!.id).some((l) => l.igdbId === igdbId);
     return { ...page, mine: { liked, dismissed: store.dismissed(req.user!.id).has(igdbId) } };
   });

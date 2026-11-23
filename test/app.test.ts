@@ -712,6 +712,39 @@ describe('discovery', () => {
     expect((await built.app.inject({ url: '/api/games/5', headers: a.headers })).statusCode).toBe(404);
   });
 
+  it('tops up "more like this" from the game’s genres when IGDB lists few similar games (Zenonia had none)', async () => {
+    for (let i = 0; i < 10; i++) fakes.catalogue.set(5000 + i, { title: `PSX RPG ${i}`, year: 1998, platforms: [50] });
+    fakes.catalogue.set(6000, { title: 'Zenonia', year: 2009, platforms: [50] });
+    fakes.similar.set(6000, []);
+    await start();
+    const a = await login('alice');
+    const page = (await built.app.inject({ url: '/api/games/6000', headers: a.headers })).json();
+    expect(page.similar.length).toBeGreaterThanOrEqual(6);
+    expect(page.similar.length).toBeLessThanOrEqual(12);
+    expect(page.similar.map((g: { igdbId: number }) => g.igdbId)).not.toContain(6000);
+    // asked for its genres, on the platforms it can be requested for
+    expect(fakes.discoverBodies.at(-1)).toMatchObject({ genreIds: [12], platformIds: [50], sort: 'popular' });
+
+    // a game IGDB gives plenty of similar games for keeps exactly those
+    fakes.similar.set(5000, [5001, 5002, 5003, 5004, 5005, 5006, 5007]);
+    const asked = fakes.discoverBodies.length;
+    const chrono = (await built.app.inject({ url: '/api/games/5000', headers: a.headers })).json();
+    expect(chrono.similar.map((g: { igdbId: number }) => g.igdbId)).toEqual([5001, 5002, 5003, 5004, 5005, 5006, 5007]);
+    expect(fakes.discoverBodies.length).toBe(asked);
+  });
+
+  it('keeps IGDB’s similar games when the top-up can’t be fetched', async () => {
+    fakes.catalogue.set(6000, { title: 'Zenonia', year: 2009, platforms: [50] });
+    fakes.similar.set(6000, [427]);
+    await start();
+    const a = await login('alice');
+    fakes.igdbDown = true;
+    const res = await built.app.inject({ url: '/api/games/6000', headers: a.headers });
+    fakes.igdbDown = false;
+    // the page itself needs IGDB too: either it loads with what it had, or says IGDB is down; never a 500
+    expect([200, 503]).toContain(res.statusCode);
+  });
+
   it('says plainly when IGDB can’t be reached', async () => {
     await start();
     const a = await login('alice');

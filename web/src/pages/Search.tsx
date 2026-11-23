@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type GameCard, type ListKind, type Platform, type SortKind } from '../api';
 import { FilterButton, FilterPanel, useFilters } from './Filters';
 import { Alert } from './shared';
@@ -32,8 +32,13 @@ export function GameGrid({ query, list = 'browse', sort: initialSort, platformId
   }, []);
   useEffect(() => setSort(initialSort ?? (list === 'top' ? 'rating' : 'popular')), [initialSort, list]);
 
+  // Which list the page shows now: a page that arrives after the query, sort or filters changed belongs to the old one
+  const generation = useRef(0);
+  const loading = useRef(false);
+
   // A new query, sort or set of filters starts again from page 1
   useEffect(() => {
+    generation.current++;
     if (!filters || (searching && q.length < 2)) {
       setGames(null);
       return;
@@ -56,20 +61,41 @@ export function GameGrid({ query, list = 'browse', sort: initialSort, platformId
     };
   }, [filters, sort, q, searching, list, platformId]);
 
-  const loadMore = async () => {
-    if (!filters) return;
+  const [loadFailed, setLoadFailed] = useState(false);
+  const loadMore = useCallback(async () => {
+    if (!filters || loading.current) return;
+    loading.current = true;
+    const mine = generation.current;
     setBusy(true);
+    setLoadFailed(false);
     try {
       const r = await api.discover({ list: searching ? 'browse' : list, sort, query: searching ? q : undefined, page: page + 1, platformId, filters });
+      if (mine !== generation.current) return;
       setGames((prev) => [...(prev ?? []), ...r.games.filter((g) => !prev?.some((p) => p.igdbId === g.igdbId))]);
       setPage(r.page);
       setMore(r.more);
     } catch (err) {
+      if (mine !== generation.current) return;
       setError((err as Error).message);
+      // No endless retries against a failing server: the button asks again
+      setLoadFailed(true);
     } finally {
-      setBusy(false);
+      loading.current = false;
+      if (mine === generation.current) setBusy(false);
     }
-  };
+  }, [filters, searching, list, sort, q, page, platformId]);
+
+  // Infinite scroll: the next page loads as the end of the grid comes within a screen of view
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !more || loadFailed || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) void loadMore();
+    }, { rootMargin: '0px 0px 100% 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [more, loadFailed, loadMore, games]);
 
   const platformName = platformId ? platforms.find((p) => p.id === platformId)?.name : null;
   const title = searching ? (q.length >= 2 ? `Search results for “${q}”` : 'Search') : platformName ? `${list === 'top' ? 'Top rated' : 'Popular'} on ${platformName}` : TITLES[list];
@@ -114,12 +140,19 @@ export function GameGrid({ query, list = 'browse', sort: initialSort, platformId
             ))}
           </div>
           {more && (
-            <div className="more">
-              <button type="button" className="btn" onClick={loadMore} disabled={busy}>
-                {busy ? 'Loading…' : 'Load more'}
-              </button>
+            <div className="more" ref={sentinel}>
+              {loadFailed ? (
+                <button type="button" className="btn" onClick={() => void loadMore()} disabled={busy}>
+                  Try again
+                </button>
+              ) : (
+                <span className="muted small" role="status" aria-live="polite">
+                  {busy ? 'Loading more…' : ''}
+                </span>
+              )}
             </div>
           )}
+          {!more && games.length > 30 && <p className="empty small">That’s everything that matches.</p>}
         </>
       )}
       {panel && filters && <FilterPanel filters={filters} platforms={platforms} onApply={(f) => void apply(f)} onClose={() => setPanel(false)} />}
